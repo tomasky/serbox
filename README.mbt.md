@@ -36,7 +36,7 @@ curl -LsSf https://raw.githubusercontent.com/tomasky/serbox/main/install.sh | ba
 
 # from source (MoonBit)
 moon build --target native --release
-./_build/native/release/build/cmd/main/main.exe version
+./_build/native/release/build/cmd/serbox/serbox.exe version
 ```
 
 Supported targets: `linux-x86_64`, `linux-aarch64`. serbox is meant to run on
@@ -278,7 +278,7 @@ scripts/build-linux-static.sh      # static musl binary in dist/
 An end-to-end check that needs Docker:
 
 ```bash
-SERBOX_HOME=$(mktemp -d) scripts/test-e2e.sh ./_build/native/release/build/cmd/main/main.exe
+SERBOX_HOME=$(mktemp -d) scripts/test-e2e.sh ./_build/native/release/build/cmd/serbox/serbox.exe
 ```
 
 ## Publishing
@@ -287,7 +287,7 @@ Releases are cut from a tag:
 
 ```bash
 # bump the version in moon.mod, serbox.mbt and npmjs/package.json
-git tag v0.1.5 && git push origin v0.1.5
+git tag v0.1.5 && git push origin v0.1.6
 ```
 
 The release workflow builds both static Linux binaries, publishes a GitHub

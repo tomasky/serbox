@@ -42,12 +42,12 @@ jobs:
         run: moon build --target native --release
 
       - name: Remote layer (two daemons, one CLI)
-        run: ./scripts/test-remote.sh _build/native/release/build/cmd/main/main.exe
+        run: ./scripts/test-remote.sh _build/native/release/build/cmd/serbox/serbox.exe
 
       - name: Exercise the CLI without docker
         run: |
           set -eu
-          bin=_build/native/release/build/cmd/main/main.exe
+          bin=_build/native/release/build/cmd/serbox/serbox.exe
           "$bin" version
           "$bin" help >/dev/null
           "$bin" ls --json | grep -q '^\[\]'
@@ -107,7 +107,7 @@ jobs:
         run: moon build --target native --release
 
       - name: Podman end-to-end
-        run: ./scripts/test-podman.sh _build/native/release/build/cmd/main/main.exe
+        run: ./scripts/test-podman.sh _build/native/release/build/cmd/serbox/serbox.exe
 
   npm:
     name: npm launcher

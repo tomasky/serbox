@@ -9,7 +9,7 @@
 
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-bin="${1:-$root/_build/native/release/build/cmd/main/main.exe}"
+bin="${1:-$root/_build/native/release/build/cmd/serbox/serbox.exe}"
 command -v podman >/dev/null || {
   echo "skip: podman is not installed"
   exit 0

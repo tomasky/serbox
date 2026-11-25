@@ -106,7 +106,7 @@ cd "$root"
 MOON_CC="$work/serbox-musl-gcc" MOON_AR=ar \
   moon build --target native --release
 
-bin="$root/_build/native/release/build/cmd/main/main.exe"
+bin="$root/_build/native/release/build/cmd/serbox/serbox.exe"
 [ -f "$bin" ] || die "build did not produce $bin"
 
 mkdir -p "$(dirname "$out")"

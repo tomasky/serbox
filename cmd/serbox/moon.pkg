@@ -1,5 +1,5 @@
 import {
-  "kupas/serbox",
+  "kupas/serbox" @lib,
   "moonbitlang/async/stdio",
 }
 

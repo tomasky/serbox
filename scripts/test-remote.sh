@@ -11,7 +11,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-bin="${1:-$root/_build/native/release/build/cmd/main/main.exe}"
+bin="${1:-$root/_build/native/release/build/cmd/serbox/serbox.exe}"
 [ -x "$bin" ] || {
   printf 'error: %s is not executable; build it first\n' "$bin" >&2
   exit 1
