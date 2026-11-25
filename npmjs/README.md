@@ -20,7 +20,9 @@ Requirements: Linux with a reachable Docker daemon. `serbox doctor` checks it.
 Docker boxes on the machine it runs on and gives you `create`, `exec`, `ssh`,
 `push`/`pull`, `suspend`, `snapshot`, `fork`, `port publish`, `secrets` and
 `skills install` around them, with `--json` and documented exit codes for
-agents and scripts.
+agents and scripts. Four agent skills (`serbox`, `serbox-snapshots`,
+`serbox-move-repo`, `serbox-basic-setup`) ship in this package under `skills/`
+and are also embedded in the binary, so installation works offline.
 
 Full documentation: https://github.com/tomasky/serbox
 

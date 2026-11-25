@@ -23,6 +23,12 @@ jobs:
       - name: Update registry index
         run: moon update
 
+      - name: Skills data is up to date
+        run: |
+          python3 scripts/gen-skills.py
+          moon fmt
+          git diff --exit-code -- skills_data.mbt
+
       - name: Check formatting
         run: moon fmt --check
 
@@ -46,6 +52,12 @@ jobs:
           "$bin" help >/dev/null
           "$bin" ls --json | grep -q '^\[\]'
           "$bin" exec nope --json -- true || test "$?" = 4
+          home=$(mktemp -d)
+          HOME="$home" "$bin" skills list | grep -q serbox-move-repo
+          HOME="$home" "$bin" skills install --target claude -y >/dev/null
+          test -f "$home/.claude/skills/serbox-basic-setup/scripts/scan.mjs"
+          test -f "$home/.claude/skills/serbox-move-repo/scripts/repo-files.mjs"
+          HOME="$home" "$bin" skills install --target claude -y | grep -q "already up to date"
 
   static:
     name: static Linux binary

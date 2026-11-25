@@ -184,6 +184,25 @@ docker rm -f "serbox-$name-gone" >/dev/null || fail "docker rm gone"
 expect_code 4 "$bin" get "$name-gone"
 ok "rm removes the record of a missing container"
 
+say "agent skills"
+skill_home="$(mktemp -d)"
+HOME="$skill_home" "$bin" skills list | grep -q serbox-move-repo || fail "skills list"
+HOME="$skill_home" "$bin" skills install --target claude -y >/dev/null ||
+  fail "skills install"
+[ -f "$skill_home/.claude/skills/serbox-basic-setup/scripts/scan.mjs" ] ||
+  fail "skills install missed a script"
+node "$skill_home/.claude/skills/serbox-basic-setup/scripts/scan.mjs" --json |
+  python3 -c 'import json,sys; json.load(sys.stdin)' || fail "scan.mjs output"
+printf '%s\n' '---' 'name: mine' '---' >"$skill_home/.claude/skills/serbox/SKILL.md"
+HOME="$skill_home" "$bin" skills install --target claude --only nope -y >/dev/null 2>&1 &&
+  fail "installing an unknown skill succeeded"
+HOME="$skill_home" "$bin" skills install --target claude -y | grep -q "kept your own" ||
+  fail "a user skill was not kept"
+grep -q "name: mine" "$skill_home/.claude/skills/serbox/SKILL.md" ||
+  fail "a user skill was overwritten"
+rm -rf "$skill_home"
+ok "skills install to a clean HOME keeps user copies"
+
 say "cleanup"
 expect_code 4 "$bin" exec "$name" -- true
 "$bin" rm "$name-renamed" --yes >/dev/null || fail "rm renamed"

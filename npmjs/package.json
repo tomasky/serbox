@@ -9,7 +9,8 @@
   "files": [
     "bin/serbox.js",
     "lib.js",
-    "README.md"
+    "README.md",
+    "skills"
   ],
   "engines": {
     "node": ">=18"
@@ -22,7 +23,8 @@
     "arm64"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "prepack": "node scripts/copy-skills.js"
   },
   "repository": {
     "type": "git",

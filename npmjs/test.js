@@ -216,3 +216,24 @@ test("a checksum mismatch removes the downloaded file", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("ships the four skill folders and their scripts", () => {
+  const root = path.join(__dirname, "..", "skills");
+  const names = fs.readdirSync(root).filter((n) =>
+    fs.existsSync(path.join(root, n, "SKILL.md"))
+  );
+  assert.deepEqual(names.sort(), [
+    "serbox",
+    "serbox-basic-setup",
+    "serbox-move-repo",
+    "serbox-snapshots",
+  ]);
+  assert.ok(
+    fs.existsSync(
+      path.join(root, "serbox-move-repo", "scripts", "repo-files.mjs")
+    )
+  );
+  assert.ok(
+    fs.existsSync(path.join(root, "serbox-basic-setup", "scripts", "scan.mjs"))
+  );
+});

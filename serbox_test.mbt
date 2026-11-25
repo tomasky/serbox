@@ -266,3 +266,27 @@ test "docker trouble is not mistaken for a deleted box" {
   assert_eq(@serbox.display_state("unknown", ""), "unknown")
   assert_eq(@serbox.display_state("paused", "auto"), "auto-paused")
 }
+
+///|
+test "all four bundled skills carry their guide and scripts" {
+  let names = @serbox.bundled_skill_names()
+  assert_eq(names.length(), 4)
+  for name in names {
+    let mut has_guide = false
+    for file in @serbox.bundled_skill_files() {
+      if file.skill == name && file.path == "SKILL.md" {
+        has_guide = true
+        assert_true(file.body.contains("installed-by: serbox"))
+        assert_false(@serbox.skill_description(name) == "")
+      }
+    }
+    assert_true(has_guide)
+  }
+  let mut has_script = false
+  for file in @serbox.bundled_skill_files() {
+    if file.path.has_prefix("scripts/") {
+      has_script = true
+    }
+  }
+  assert_true(has_script)
+}

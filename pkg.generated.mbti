@@ -43,6 +43,10 @@ pub let box_shell : String
 
 pub fn boxes_dir() -> String
 
+pub fn bundled_skill_files() -> Array[SkillFile]
+
+pub fn bundled_skill_names() -> Array[String]
+
 pub async fn cmd_auto_suspend(Args) -> Unit
 
 pub async fn cmd_completion(Args) -> Unit
@@ -357,8 +361,6 @@ pub fn serbox_getpid() -> Int32
 
 pub fn serbox_home() -> String
 
-pub let serbox_skill : String
-
 pub let serbox_version : String
 
 pub fn serve_log_path() -> String
@@ -376,6 +378,8 @@ pub fn set_json_mode(Bool) -> Unit
 pub fn shell_join(Array[String]) -> String
 
 pub fn shell_quote(String) -> String
+
+pub fn skill_description(String) -> String
 
 pub fn skill_targets() -> Array[SkillTarget]
 
@@ -544,6 +548,12 @@ pub(all) struct PortForward {
 pub(all) struct PortMap {
   mut container : Int32
   mut host : Int32
+}
+
+pub struct SkillFile {
+  skill : String
+  path : String
+  body : String
 }
 
 pub struct SkillTarget {

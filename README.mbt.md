@@ -157,7 +157,7 @@ Anyone with the token can run commands in your boxes.
 | `jobs ls/logs/wait/kill` | background commands started by `exec --background` |
 | `ps`, `history`, `output`, `disk`, `metrics`, `logs` | look inside |
 | `templates`, `usage`, `doctor`, `completion`, `update` | host and shell help |
-| `skills install` | install the serbox agent skill |
+| `skills list/install` | install the bundled agent skills |
 | `serve`, `host add/ls/use/current/rm` | run and use boxes on other servers |
 
 Global flags: `-H/--remote HOST`, `--json` (`-o json`), `--no-color`.
@@ -180,13 +180,25 @@ line on stderr, so scripts can parse stdout without losing the reason.
 ### Agent skills
 
 ```bash
-serbox skills install          # asks which agents it found
-serbox skills install --all -y # claude, codex/cursor/opencode, gemini
+serbox skills list             # what ships in the binary
+serbox skills install -y       # every skill, every agent it finds
+serbox skills install --target claude,codex
+serbox skills install --only serbox-snapshots -y
 ```
 
-The skill teaches an agent the loop — create a box, work inside it, bring
-results back, clean up — and is installed as plain `SKILL.md` files, so no
-network access is needed afterwards.
+Four complete skills ship inside the binary (and in the npm package):
+
+| Skill | Covers |
+| --- | --- |
+| `serbox` | create, exec, files, jobs, ports, pause, remote hosts |
+| `serbox-snapshots` | save, restore, fork, import and delete snapshots |
+| `serbox-move-repo` | copy a git checkout, its worktrees and uncommitted work into a box, then install dependencies |
+| `serbox-basic-setup` | store tokens as secrets, copy git and editor config, verify what still needs a manual step |
+
+Each installs as a directory with `SKILL.md` and any helper scripts
+(`scripts/repo-files.mjs`, `scripts/deps.sh`, ...), so an agent has the exact
+commands without network access. A skill you wrote yourself (one without the
+`installed-by: serbox` marker) is never overwritten.
 
 ### Secrets
 

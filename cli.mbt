@@ -656,7 +656,7 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
         parse_args(
           rest,
           with_common(["name", "description", "snapshot"], []).0,
-          with_common([], ["yes", "root-only", "restart", "stopped"]).1,
+          with_common([], ["yes"]).1,
         ),
       )
     "fork" | "clone" =>
@@ -683,7 +683,7 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
       cmd_skills(
         parse_args(
           rest,
-          with_common([], []).0,
+          with_common(["target", "only"], []).0,
           with_common([], [
             "yes", "claude", "codex", "cursor", "opencode", "antigravity", "all",
           ]).1,
@@ -842,7 +842,10 @@ pub async fn print_command_help(command : String) -> Unit {
       "serbox port ls [BOX]\n" +
       "serbox port unpublish BOX PORT"
     "skills" =>
-      "serbox skills install [-y] [--claude|--codex|--cursor|--opencode|--antigravity|--all]"
+      "serbox skills list\n" +
+      "serbox skills install [-y] [--target claude,codex] [--only NAME]\n" +
+      "                    [--claude|--codex|--cursor|--opencode|--antigravity]\n" +
+      "skills: serbox, serbox-snapshots, serbox-move-repo, serbox-basic-setup"
     "host" =>
       "serbox host add NAME USER@HOST [--port P] [--install] [--force]\n" +
       "serbox host add NAME --address 127.0.0.1:P --token T\n" +
