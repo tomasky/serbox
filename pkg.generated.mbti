@@ -295,7 +295,7 @@ pub async fn print_command_help(String) -> Unit
 
 pub async fn print_usage() -> Unit
 
-pub async fn publish_port(BoxConfig, Int32, Int32) -> PortForward
+pub async fn publish_port(BoxConfig, Int32, Int32, String) -> PortForward
 
 pub async fn pull_image(String) -> Bool
 
@@ -331,7 +331,7 @@ pub async fn restart_container(String) -> DockerResult
 
 pub async fn run_container(String, String, Array[String]) -> DockerResult
 
-pub async fn run_forwarder(String, Int32, Int32) -> Unit
+pub async fn run_forwarder(String, Int32, Int32, String) -> Unit
 
 pub async fn run_setup_file(BoxConfig, String, Bool) -> Unit
 
@@ -348,6 +348,8 @@ pub async fn secrets_names() -> Array[String]
 pub fn secrets_path() -> String
 
 pub async fn self_exe() -> String
+
+pub fn serbox_echo(Int32) -> Unit
 
 pub fn serbox_exit(Int32) -> Unit
 
@@ -389,7 +391,7 @@ pub fn split_assignment(String) -> (String, String)?
 
 pub async fn start_container(String) -> DockerResult
 
-pub async fn start_job(BoxConfig, Array[String], String?, Map[String, String]) -> Job
+pub async fn start_job(BoxConfig, Array[String], String?, Map[String, String], Int64?) -> Job
 
 pub fn stdout_is_tty() -> Bool
 
@@ -402,6 +404,8 @@ pub let template_names : Array[String]
 pub async fn touch_box(BoxConfig) -> Unit
 
 pub fn trim_trailing_slash(String) -> String
+
+pub fn truncate_utf8(String, Int32) -> String
 
 pub async fn unpause_container(String) -> DockerResult
 
@@ -416,6 +420,8 @@ pub fn usage_error(String) -> CliError
 pub fn user_home() -> String
 
 pub fn valid_box_name(String) -> Bool
+
+pub fn valid_env_key(String) -> Bool
 
 pub fn valid_secret_name(String) -> Bool
 
@@ -464,6 +470,7 @@ pub(all) struct BoxConfig {
   mut max_run_secs : Int64
   mut paused_by : String
   mut last_used_at : Int64
+  mut running_since : Int64
   mut delete_at : Int64
   mut setup_exit : Int32
 }

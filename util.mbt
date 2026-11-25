@@ -55,7 +55,17 @@ pub fn path_dirname(path : String) -> String {
 pub fn path_basename(path : String) -> String {
   let view = path.clamped_view()
   match view.rev_find("/") {
-    Some(i) => view.exact_view(start=i + 1, end=view.length()).to_owned()
+    Some(i) =>
+      if i + 1 >= view.length() {
+        // `"/"` and `"a/"` name the directory itself, not an empty string.
+        if i == 0 {
+          "/"
+        } else {
+          view.exact_view(start=0, end=i).to_owned()
+        }
+      } else {
+        view.exact_view(start=i + 1, end=view.length()).to_owned()
+      }
     None => path
   }
 }
@@ -86,6 +96,12 @@ pub async fn write_text(path : String, text : String) -> Unit {
 /// Write a file only the owner can read, for hosts and secrets.
 pub async fn write_secret(path : String, text : String) -> Unit {
   @fs.write_file(path, text, create_mode=@fs.CreateOrTruncate, permission=0o600)
+  // `permission=` only applies when the file is created. An existing file
+  // written by an older build (or restored from a backup) may still be 0644,
+  // and these files hold tokens and secrets, so enforce the mode every time.
+  @fs.chmod(path, 0o600) catch {
+    _ => ()
+  }
 }
 
 ///|
@@ -133,6 +149,9 @@ pub fn parse_duration(
       if number < 0 {
         number = 0L
       }
+      if number > 100000000000L {
+        return None
+      }
       number = number * 10L + (c.to_int().to_int64() - 48L)
       any = true
     } else {
@@ -147,12 +166,20 @@ pub fn parse_duration(
         'w' => 604800L
         _ => return None
       }
+      // Reject absurd values instead of letting Int64 wrap into a negative
+      // duration, which would make a limit mean "immediately".
+      if number > 100000000000L {
+        return None
+      }
       total = total + number * unit
       number = -1L
     }
     i = i + 1
   }
   if number >= 0 {
+    if number > 100000000000L {
+      return None
+    }
     total = total + number * default_unit_secs
   }
   if !any {
@@ -235,6 +262,35 @@ pub fn valid_box_name(name : String) -> Bool {
 }
 
 ///|
+/// Truncate to at most `limit` bytes without splitting a UTF-8 character, so
+/// stored command output stays valid JSON.
+pub fn truncate_utf8(text : String, limit : Int32) -> String {
+  if text.length() <= limit {
+    return text
+  }
+  let buf = StringBuilder()
+  let mut used = 0
+  for ch in text {
+    let code = ch.to_int()
+    let size = if code <= 0x7F {
+      1
+    } else if code <= 0x7FF {
+      2
+    } else if code <= 0xFFFF {
+      3
+    } else {
+      4
+    }
+    if used + size > limit {
+      break
+    }
+    buf.write_char(ch)
+    used = used + size
+  }
+  buf.to_string()
+}
+
+///|
 /// Quote one argument for a POSIX shell, so `exec` can hand a shell string
 /// through `bash -lc` without the caller's metacharacters being reinterpreted
 /// a second time.
@@ -264,6 +320,25 @@ pub fn shell_join(args : Array[String]) -> String {
     buf.write_string(shell_quote(args[i]))
   }
   buf.to_string()
+}
+
+///|
+/// Environment variable names: a letter or `_`, then letters, digits or `_`.
+pub fn valid_env_key(key : String) -> Bool {
+  if key.length() == 0 || key.length() > 128 {
+    return false
+  }
+  for i in 0..<key.length() {
+    let c = key.get_char(i).unwrap_or(' ')
+    let ok = (c >= 'A' && c <= 'Z') ||
+      (c >= 'a' && c <= 'z') ||
+      (c >= '0' && c <= '9') ||
+      c == '_'
+    if !ok || (i == 0 && c >= '0' && c <= '9') {
+      return false
+    }
+  }
+  true
 }
 
 ///|
@@ -437,6 +512,10 @@ pub async fn read_lines(path : String) -> Array[String] {
 ///|
 /// FFI: `isatty(3)`, so color decisions match the terminal.
 extern "C" fn serbox_isatty(fd : Int32) -> Int32 = "serbox_isatty"
+
+///|
+/// FFI: toggle terminal echo, for a secret typed at a prompt.
+pub extern "C" fn serbox_echo(on : Int32) -> Unit = "serbox_echo"
 
 ///|
 /// FFI: this process's pid, for the daemon's pid file.

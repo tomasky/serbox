@@ -78,7 +78,8 @@ pub async fn push_path(
   }
   let target = match remote {
     Some(path) => path
-    None => box_home
+    // A bare `push box ./file` means "into my home", not "replace /data/home".
+    None => "\{box_home}/"
   }
   if parents && target != box_home {
     // `-p` creates the parents of the destination, and the destination when it
@@ -161,7 +162,7 @@ pub async fn cmd_push(args : Args) -> Unit {
 /// `serbox pull BOX REMOTE [LOCAL]`
 pub async fn cmd_pull(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  require_usable(config, false)
+  require_usable(config, true)
   let remote = args.arg(1, "remote path")
   let host_path = args.arg_opt(2)
   pull_path(config.name, remote, host_path)
@@ -204,10 +205,14 @@ fn parse_remote_ref(text : String) -> RemoteRef? {
 pub async fn cmd_cp(args : Args) -> Unit {
   let src = args.arg(0, "source")
   let dst = args.arg(1, "destination")
-  match (parse_remote_ref(src), parse_remote_ref(dst)) {
+  // `foo:bar` is a legal local filename. Only treat it as BOX:/path when the
+  // local file does not exist.
+  let src_exists = @fs.exists(src) catch { _ => false }
+  let src_ref = if src_exists { None } else { parse_remote_ref(src) }
+  match (src_ref, parse_remote_ref(dst)) {
     (Some(from), None) => {
       let config = load_box_or_fail(from.box)
-      require_usable(config, false)
+      require_usable(config, true)
       pull_path(config.name, from.path, Some(dst))
     }
     (None, Some(to)) => {
@@ -232,7 +237,7 @@ pub async fn cmd_cp(args : Args) -> Unit {
 /// `serbox files BOX [PATH]`: list a directory, print a text file.
 pub async fn cmd_files(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  require_usable(config, false)
+  require_usable(config, true)
   let path = match args.arg_opt(1) {
     Some(path) => path
     None => box_home

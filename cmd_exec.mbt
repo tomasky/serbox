@@ -138,14 +138,17 @@ pub async fn cmd_exec(args : Args) -> Unit {
   let env : Map[String, String] = Map([])
   for text in args.all("env") {
     let (key, value) = parse_assignment(text, "env")
+    if !valid_env_key(key) {
+      raise usage_error("bad --env name '\{key}' (letters, digits and _)")
+    }
     env.set(key, value)
   }
   let timeout_secs = match args.value("timeout") {
     Some(text) =>
       match parse_duration(text, default_unit_secs=1L) {
-        Some(secs) if secs > 0L && secs <= 3600L => Some(secs)
-        Some(secs) if secs > 3600L =>
-          raise usage_error("--timeout is at most 3600")
+        Some(secs) if secs > 0L && secs <= 600L => Some(secs)
+        Some(secs) if secs > 600L =>
+          raise usage_error("--timeout is at most 600 seconds")
         _ => raise usage_error("bad --timeout '\{text}'")
       }
     None => Some(60L)
@@ -156,7 +159,7 @@ pub async fn cmd_exec(args : Args) -> Unit {
     _ => ()
   }
   if background {
-    let job = start_job(config, command, cwd, env)
+    let job = start_job(config, command, cwd, env, timeout_secs)
     if json_only(
         @json.Json::object(
           Map([
@@ -175,7 +178,10 @@ pub async fn cmd_exec(args : Args) -> Unit {
   let argv = exec_argv(command, timeout_secs, shell=config.shell)
   let stdin = args.flag("stdin")
   if args.flag("stream") {
-    let code = exec_in_box(config.name, argv, cwd, env, stdin)
+    let code = normalize_timeout_code(
+      exec_in_box(config.name, argv, cwd, env, stdin),
+      timeout_secs,
+    )
     record_exec(
       config.name,
       command,
@@ -195,8 +201,8 @@ pub async fn cmd_exec(args : Args) -> Unit {
       Map([
         ("stdout", @json.Json::string(result.out)),
         ("stderr", @json.Json::string(result.err)),
-        ("exitCode", @json.Json::number(result.code.to_double())),
-        ("timedOut", @json.Json::boolean(result.code == 124)),
+        ("exitCode", @json.Json::number(code.to_double())),
+        ("timedOut", @json.Json::boolean(code == 124)),
       ]),
     )
     let _ = json_only(body)
@@ -268,11 +274,7 @@ async fn record_exec(
 
 ///|
 fn truncate_output(text : String) -> String {
-  if text.length() <= 65536 {
-    text
-  } else {
-    text.clamped_view().exact_view(start=0, end=65536).to_owned()
-  }
+  truncate_utf8(text, 65536)
 }
 
 ///|
@@ -362,6 +364,7 @@ pub async fn cmd_jobs(args : Args) -> Unit {
     }
     "logs" => {
       let job_id = args.arg(2, "job id")
+      require_job_id(job_id)
       let follow = args.flag("follow")
       let cmd : Array[String] = [
         "exec",
@@ -381,6 +384,7 @@ pub async fn cmd_jobs(args : Args) -> Unit {
     }
     "wait" => {
       let job_id = args.arg(2, "job id")
+      require_job_id(job_id)
       let timeout = match args.value("timeout") {
         Some(text) =>
           match parse_duration(text) {
@@ -414,8 +418,14 @@ pub async fn cmd_jobs(args : Args) -> Unit {
     }
     "kill" => {
       let job_id = args.arg(2, "job id")
+      require_job_id(job_id)
       let signal = match args.value("signal") {
-        Some(signal) => signal
+        Some(signal) => {
+          if !valid_signal(signal) {
+            raise usage_error("bad --signal '\{signal}' (e.g. TERM, KILL, 9)")
+          }
+          signal
+        }
         None => "TERM"
       }
       let pid = job_pid(config.name, job_id)
@@ -437,6 +447,40 @@ pub async fn cmd_jobs(args : Args) -> Unit {
     }
     _ => raise usage_error("unknown jobs subcommand '\{sub}'")
   }
+}
+
+///|
+/// Job ids are generated as `j` followed by digits; anything else must not
+/// reach a shell or a path inside the box.
+fn require_job_id(id : String) -> Unit raise {
+  let ok = id.length() > 1 && id.clamped_view().has_prefix("j")
+  for i in 1..<id.length() {
+    let c = id.get_char(i).unwrap_or(' ')
+    if c < '0' || c > '9' {
+      raise CliError::Failed(4, "bad job id '\{id}'")
+    }
+  }
+  if !ok {
+    raise CliError::Failed(4, "bad job id '\{id}'")
+  }
+}
+
+///|
+fn valid_signal(signal : String) -> Bool {
+  if signal.length() == 0 || signal.length() > 16 {
+    return false
+  }
+  for i in 0..<signal.length() {
+    let c = signal.get_char(i).unwrap_or(' ')
+    let ok = (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c == '+' ||
+      c == '-'
+    if !ok {
+      return false
+    }
+  }
+  true
 }
 
 ///|
@@ -487,15 +531,30 @@ pub async fn start_job(
   command : Array[String],
   cwd : String?,
   env : Map[String, String],
+  timeout_secs : Int64?,
 ) -> Job {
   let id = generate_box_name("j")
   let run_dir = match cwd {
     Some(dir) => dir
     None => box_home
   }
+  // One argument is a shell string; several are an exact argv. Quoting the
+  // argv form keeps `exec --background box -- echo a b` from becoming a
+  // different command than the foreground one.
+  let body = if command.length() == 1 {
+    command[0]
+  } else {
+    exec_argv(command, timeout_secs, shell=config.shell) |> shell_join
+  }
+  let body = match timeout_secs {
+    Some(secs) if command.length() == 1 =>
+      "timeout -k 5 \{secs}s \{config.shell} -lc \{shell_quote(body)}"
+    Some(secs) => "timeout -k 5 \{secs}s \{body}"
+    None => body
+  }
   let script = "mkdir -p /data/.serbox/jobs\n" +
     "cd \{shell_quote(run_dir)} || exit 1\n" +
-    "(\n\{command.join(" ")}\n) > \{job_log_path(id)} 2>&1 &\n" +
+    "(\n\{body}\n) > \{job_log_path(id)} 2>&1 &\n" +
     "echo $! > /data/.serbox/jobs/\{id}.pid\n" +
     "wait $!\n" +
     "echo $? > /data/.serbox/jobs/\{id}.exit\n"
@@ -685,7 +744,7 @@ pub async fn cmd_output(args : Args) -> Unit {
 /// `serbox disk`
 pub async fn cmd_disk(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  require_usable(config, false)
+  require_usable(config, true)
   let result = exec_in_box_capture(config.name, [
     "sh", "-c", "df -P / /data 2>/dev/null",
   ])
@@ -702,11 +761,15 @@ pub async fn cmd_disk(args : Args) -> Unit {
 /// `serbox metrics`: one Docker stats sample.
 pub async fn cmd_metrics(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  match container_stats(config.name) {
-    Some(json) => if json_only(json) { return }
+  let stats = match container_stats(config.name) {
+    Some(json) => {
+      if json_only(json) {
+        return
+      }
+      json
+    }
     None => raise CliError::Failed(1, "box '\{config.name}' is not running")
   }
-  let stats = container_stats(config.name).unwrap()
   let fields = [
     ("cpu", "CPUPerc"),
     ("memory", "MemUsage"),

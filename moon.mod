@@ -19,6 +19,6 @@ description = "Self-hosted Linux boxes for agents, like instabox but on your own
 preferred_target = "native"
 
 import {
-  "moonbitlang/async@0.22.9",
-  "moonbitlang/x@0.5.7",
+  "moonbitlang/async@0.22.10",
+  "moonbitlang/x@0.5.9",
 }

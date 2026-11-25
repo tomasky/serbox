@@ -10,7 +10,7 @@
 // under `--ignore-scripts`, and under `npx`, so that is what this does.
 //
 // Overrides (all optional):
-//   SERBOX_REPO            owner/repo       (default: kupas/serbox)
+//   SERBOX_REPO            owner/repo       (default: tomasky/serbox)
 //   SERBOX_VERSION         release version  (default: this package's version)
 //   SERBOX_DOWNLOAD_BASE   full base URL    (overrides SERBOX_REPO/SERBOX_VERSION)
 //   SERBOX_CACHE_DIR       where the binary is kept
@@ -49,7 +49,7 @@ function repoSlug() {
       ? pkg.repository
       : (pkg.repository && pkg.repository.url) || "";
   const m = url.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-  return m ? `${m[1]}/${m[2]}` : "kupas/serbox";
+  return m ? `${m[1]}/${m[2]}` : "tomasky/serbox";
 }
 
 function version() {

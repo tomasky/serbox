@@ -13,6 +13,14 @@ const http = require("node:http");
 const { execFileSync } = require("node:child_process");
 
 const lib = require("./lib.js");
+const pkg = require("./package.json");
+
+// The repository lives in package.json; a rename must not require editing
+// tests, so derive the expected slug instead of hardcoding it.
+const slug = pkg.repository.url
+  .replace(/^https?:\/\/github\.com\//, "")
+  .replace(/^git@github\.com:/, "")
+  .replace(/\.git$/, "");
 
 test("maps every supported Node platform-arch to a release target", () => {
   assert.equal(lib.TARGETS["linux-x64"], "linux-x86_64");
@@ -21,19 +29,19 @@ test("maps every supported Node platform-arch to a release target", () => {
 });
 
 test("resolves the repository slug from package.json", () => {
-  assert.equal(lib.repoSlug(), "kupas/serbox");
+  assert.equal(lib.repoSlug(), slug);
 });
 
 test("falls back from the pinned version to latest", () => {
   const urls = lib.downloadUrls("linux-x86_64");
   assert.equal(urls.length, 2);
-  assert.match(
+  assert.equal(
     urls[0],
-    /^https:\/\/github\.com\/kupas\/serbox\/releases\/download\/v\d+\.\d+\.\d+\/serbox-linux-x86_64$/
+    `https://github.com/${slug}/releases/download/v${pkg.version}/serbox-linux-x86_64`
   );
   assert.equal(
     urls[1],
-    "https://github.com/kupas/serbox/releases/latest/download/serbox-linux-x86_64"
+    `https://github.com/${slug}/releases/latest/download/serbox-linux-x86_64`
   );
 });
 

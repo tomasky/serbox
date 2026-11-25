@@ -37,6 +37,8 @@ fail() {
 }
 cleanup() {
   "$bin" rm "$name" --yes >/dev/null 2>&1 || true
+  "$bin" rm "$name-sec" --yes >/dev/null 2>&1 || true
+  "$bin" rm "$name-gone" --yes >/dev/null 2>&1 || true
   "$bin" rm "$name-copy" --yes >/dev/null 2>&1 || true
   "$bin" snapshot rm "$name-snap" --yes >/dev/null 2>&1 || true
   "$bin" rm "$name-renamed" --yes >/dev/null 2>&1 || true
@@ -75,6 +77,9 @@ expect_code 124 "$bin" exec "$name" --timeout 1 -- 'sleep 5'
 ok "timeout returns 124"
 [ "$(printf 'piped' | "$bin" exec "$name" --stdin -- 'cat')" = "piped" ] || fail "stdin"
 ok "stdin is forwarded"
+# A flag after `--` belongs to the command, not to serbox.
+[ "$("$bin" exec "$name" -- printf '%s' '--json')" = "--json" ] || fail "-- after separator"
+ok "flags after -- are passed through untouched"
 out="$("$bin" exec "$name" --json -- 'echo out; echo err >&2')"
 echo "$out" | grep -q '"stdout":"out' || fail "--json stdout"
 echo "$out" | grep -q '"exitCode":0' || fail "--json exitCode"
@@ -102,6 +107,19 @@ ok "pull copies a file"
 "$bin" push "$name" "$work/a.txt" /data/d >/dev/null || fail "push into dir"
 "$bin" files "$name" /data/d | grep -q a.txt || fail "files list"
 ok "push into a directory and list it"
+"$bin" push "$name" "$work/a.txt" >/dev/null || fail "push to home"
+[ "$("$bin" exec "$name" -- 'cat /data/home/a.txt')" = "hello" ] || fail "push home contents"
+ok "push without a remote path lands in the home directory"
+
+say "secrets"
+printf 's3cret' | "$bin" secrets set E2E_TOKEN >/dev/null || fail "secrets set"
+"$bin" create --name "$name-sec" --template alpine --secrets E2E_TOKEN >/dev/null ||
+  fail "create with secrets"
+[ "$("$bin" exec "$name-sec" -- 'printf %s "$E2E_TOKEN"')" = "s3cret" ] || fail "secret env"
+"$bin" secrets push "$name-sec" >/dev/null || fail "secrets push"
+[ "$("$bin" exec "$name-sec" -- 'stat -c %a /data/.serbox/secrets.env')" = "600" ] ||
+  fail "secrets file mode"
+ok "secrets reach a box and the pushed file is 0600"
 
 say "suspend and resume"
 "$bin" suspend "$name" >/dev/null || fail "suspend"
@@ -109,6 +127,9 @@ expect_code 1 "$bin" exec "$name" -- true
 "$bin" resume "$name" >/dev/null || fail "resume"
 [ "$("$bin" exec "$name" -- 'echo awake')" = "awake" ] || fail "resume exec"
 ok "paused boxes refuse work until resumed"
+"$bin" max-run "$name" 0 >/dev/null || fail "max-run 0"
+"$bin" ls | grep -q "running" || fail "max-run 0 paused the box"
+ok "max-run 0 disables the limit instead of pausing"
 
 say "snapshot and fork"
 "$bin" snapshot save "$name" --name "$name-snap" >/dev/null || fail "snapshot save"
@@ -116,8 +137,24 @@ say "snapshot and fork"
 "$bin" fork "$name" --name "$name-copy" --count 1 >/dev/null || fail "fork"
 [ "$("$bin" exec "$name-copy" -- 'cat /data/work/a.txt')" = "hello" ] || fail "fork contents"
 ok "fork keeps /data"
+# fork --json must be one JSON document, not one per copy plus an array.
+fork_json="$("$bin" fork "$name" --name "$name-copy2" --count 1 --json 2>/dev/null || true)"
+if [ -n "$fork_json" ]; then
+  echo "$fork_json" | python3 -c 'import json,sys; json.load(sys.stdin)' ||
+    fail "fork --json is not one document"
+  "$bin" rm "$name-copy2" --yes >/dev/null
+fi
+"$bin" stop "$name" >/dev/null || fail "stop before snapshot"
+"$bin" snapshot save "$name" --name "$name-stopped" >/dev/null ||
+  fail "snapshot of a stopped box"
+"$bin" snapshot rm "$name-stopped" --yes >/dev/null
+"$bin" start "$name" >/dev/null || fail "start after snapshot"
+ok "a stopped box can be snapshotted"
 "$bin" rename "$name-copy" "$name-renamed" >/dev/null || fail "rename"
 "$bin" get "$name-renamed" | grep -q "$name-renamed" || fail "get after rename"
+"$bin" port publish "$name-renamed" 3000 --host 18098 >/dev/null || fail "publish after rename"
+"$bin" port ls | grep -q "$name-renamed" || fail "rename lost the port record"
+"$bin" port unpublish "$name-renamed" 3000 >/dev/null
 ok "rename"
 
 say "port publish"
@@ -133,10 +170,19 @@ ok "port forwarded and unpublished"
 
 # Removing a box must also stop its forwarders, or the host keeps a listener
 # that only answers with connection resets.
-"$bin" port publish "$name" 3000 --host 18099 >/dev/null || fail "re-publish"
+"$bin" port publish "$name" 3000 --host 18099 --private >/dev/null || fail "re-publish"
+ss -ltn | grep -q "127.0.0.1:18099" || fail "--private did not bind loopback"
+ok "port publish --private binds loopback only"
 "$bin" rm "$name" --yes >/dev/null || fail "rm with a published port"
 "$bin" port ls | grep -q "$name" && fail "rm left a port record behind"
 ok "rm stopped the forwarder"
+
+say "rm cleans up a box whose container vanished"
+"$bin" create --name "$name-gone" --template alpine >/dev/null || fail "create gone"
+docker rm -f "serbox-$name-gone" >/dev/null || fail "docker rm gone"
+"$bin" rm "$name-gone" --yes >/dev/null || fail "rm with a missing container"
+expect_code 4 "$bin" get "$name-gone"
+ok "rm removes the record of a missing container"
 
 say "cleanup"
 expect_code 4 "$bin" exec "$name" -- true

@@ -161,12 +161,24 @@ pub async fn cmd_secrets(args : Args) -> Unit {
       ensure_dir(serbox_home()) catch {
         _ => ()
       }
-      write_text(host_path, buf.to_string()) catch {
+      write_secret(host_path, buf.to_string()) catch {
         _ => raise CliError::Failed(1, "could not stage the secrets file")
       }
-      let copied = copy_in(config.name, host_path, "/data/.serbox/secrets.env")
+      let prepared = exec_in_box_capture(config.name, [
+        "mkdir", "-p", "/data/.serbox",
+      ])
+      let copied = if prepared.code == 0 {
+        copy_in(config.name, host_path, "/data/.serbox/secrets.env")
+      } else {
+        { code: prepared.code, out: "", err: prepared.err, }
+      }
       @fs.remove(host_path, allow_missing=true) catch {
         _ => ()
+      }
+      if copied.code == 0 {
+        let _ = exec_in_box_capture(config.name, [
+          "chmod", "600", "/data/.serbox/secrets.env",
+        ])
       }
       if copied.code != 0 {
         raise CliError::Failed(
@@ -207,10 +219,32 @@ pub fn valid_secret_name(name : String) -> Bool {
 /// A secret's value: one line from stdin (a hidden prompt is the caller's job,
 /// or `echo -n value | serbox secrets set NAME`).
 async fn secret_value_from_stdin(name : String) -> String {
-  ignore(name)
-  match @stdio.stdin.read_until("\n") {
+  let interactive = serbox_isatty(0) != 0
+  if interactive {
+    @stdio.stderr.write("value for \{name}: ")
+    serbox_echo(0)
+  }
+  let read = @stdio.stdin.read_until("\n") catch { _ => None }
+  if interactive {
+    serbox_echo(1)
+    @stdio.stderr.write("\n")
+  }
+  match read {
     Some(text) => {
-      let value = text.trim_end().to_owned()
+      // Only the newline is a delimiter: a secret may legitimately end in a
+      // space, and trimming it would deliver a different value than stored.
+      let value = match text.clamped_view().rev_find("\n") {
+        Some(i) => text.clamped_view().exact_view(start=0, end=i).to_owned()
+        None => text
+      }
+      let value = if value.clamped_view().has_suffix("\r") {
+        value
+        .clamped_view()
+        .exact_view(start=0, end=value.length() - 1)
+        .to_owned()
+      } else {
+        value
+      }
       if value.length() == 0 {
         raise CliError::Failed(
           1, "empty value; pipe it in or type it at the prompt",

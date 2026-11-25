@@ -3,9 +3,9 @@
 Linux boxes for agents — on your own server.
 
 ```bash
-npx serbox create --name dev
-npx serbox ssh dev
-npx serbox rm dev --yes
+npx @tomasko/serbox create --name dev
+npx @tomasko/serbox ssh dev
+npx @tomasko/serbox rm dev --yes
 ```
 
 This package is a small launcher. On first run it downloads the statically
@@ -22,7 +22,7 @@ Docker boxes on the machine it runs on and gives you `create`, `exec`, `ssh`,
 `skills install` around them, with `--json` and documented exit codes for
 agents and scripts.
 
-Full documentation: https://github.com/kupas/serbox
+Full documentation: https://github.com/tomasky/serbox
 
 License: Apache-2.0.
 

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# serbox installer — https://github.com/kupas/serbox
+# serbox installer — https://github.com/tomasky/serbox
 #
-#   curl -LsSf https://raw.githubusercontent.com/kupas/serbox/main/install.sh | bash
-#   curl -LsSf https://raw.githubusercontent.com/kupas/serbox/main/install.sh | bash -s -- --version 0.1.1
+#   curl -LsSf https://raw.githubusercontent.com/tomasky/serbox/main/install.sh | bash
+#   curl -LsSf https://raw.githubusercontent.com/tomasky/serbox/main/install.sh | bash -s -- --version 0.1.1
 #
 # Environment overrides:
 #   SERBOX_VERSION        release version to install (default: latest)
 #   SERBOX_INSTALL_DIR    where to put the `serbox` binary (default: ~/.local/bin)
-#   SERBOX_REPO           owner/repo to download from (default: kupas/serbox)
+#   SERBOX_REPO           owner/repo to download from (default: tomasky/serbox)
 #   SERBOX_DOWNLOAD_BASE  full base URL; overrides SERBOX_REPO/SERBOX_VERSION
 set -euo pipefail
 
-REPO="${SERBOX_REPO:-kupas/serbox}"
+REPO="${SERBOX_REPO:-tomasky/serbox}"
 BIN="serbox"
 
 say() { printf '%s\n' "$*"; }

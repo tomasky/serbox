@@ -303,13 +303,33 @@ pub async fn main_cli() -> Unit {
   let remote : Ref[String] = Ref("")
   let remote_args : Array[String] = []
   let mut i = 1
+  let mut saw_separator = false
   while i < argv.length() {
     let arg = argv[i]
     i = i + 1
-    if arg == "-H" || arg == "--remote" {
-      if i < argv.length() {
-        remote.val = argv[i]
-        i = i + 1
+    if saw_separator {
+      // Everything after `--` belongs to the command, even if it looks like a
+      // serbox flag: `serbox exec dev -- echo --json` must print "--json".
+      raw.push(arg)
+      remote_args.push(arg)
+      continue
+    }
+    if arg == "--" {
+      saw_separator = true
+      raw.push(arg)
+      remote_args.push(arg)
+    } else if arg == "-H" || arg == "--remote" {
+      if i >= argv.length() {
+        report_usage("--remote needs a host name")
+        return
+      }
+      remote.val = argv[i]
+      i = i + 1
+    } else if arg.clamped_view().has_prefix("-H=") ||
+      arg.clamped_view().has_prefix("--remote=") {
+      remote.val = match split_assignment(arg) {
+        Some((_, value)) => value
+        None => ""
       }
     } else if arg == "--no-color" {
       @env.set_env_var("NO_COLOR", "1")
@@ -317,14 +337,23 @@ pub async fn main_cli() -> Unit {
       json_mode.val = true
     } else if arg == "-o" || arg == "--output" || arg == "--format" {
       // `-o json` is `--json`; anything else is a table request.
-      if i < argv.length() {
-        let value = argv[i]
-        i = i + 1
-        if value == "json" {
-          json_mode.val = true
-        }
-      } else {
-        raw.push(arg)
+      if i >= argv.length() {
+        report_usage("--output needs a value (json or table)")
+        return
+      }
+      let value = argv[i]
+      i = i + 1
+      if value == "json" {
+        json_mode.val = true
+      }
+    } else if arg.clamped_view().has_prefix("--output=") ||
+      arg.clamped_view().has_prefix("--format=") {
+      let value = match split_assignment(arg) {
+        Some((_, value)) => value
+        None => ""
+      }
+      if value == "json" {
+        json_mode.val = true
       }
     } else {
       raw.push(arg)
@@ -339,6 +368,23 @@ pub async fn main_cli() -> Unit {
     return
   }
   let command = raw[0]
+  // `serbox ls --help` is the per-command help, not a table with a stray flag.
+  if command != "help" {
+    let mut help = false
+    for arg in raw {
+      if arg == "--" {
+        break
+      }
+      if arg == "-h" || arg == "--help" {
+        help = true
+        break
+      }
+    }
+    if help {
+      print_command_help(command)
+      return
+    }
+  }
   // `host use` sets a default, so plain `serbox exec …` follows the box you
   // are working on. `-H local` and `host use local` both mean this machine.
   let explicit = remote.val.trim().to_owned()
@@ -462,7 +508,7 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
           with_common(
             [
               "name", "template", "snapshot", "image", "env", "env-file", "publish",
-              "meta", "auto-suspend", "delete-after", "setup-file", "secrets", "cwd",
+              "meta", "auto-suspend", "delete-after", "setup-file", "secrets",
             ],
             ["no-wait", "fail-fast"],
           ).0,
@@ -652,10 +698,15 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
     "update" | "self-update" =>
       cmd_update(parse_args(rest, with_common([], []).0, with_common([], []).1))
     "__forward" =>
-      if rest.length() < 3 {
+      if rest.length() < 4 {
         raise usage_error("bad internal forwarder invocation")
       } else {
-        run_forwarder(rest[0], parse_port(rest[1]), parse_port(rest[2]))
+        run_forwarder(
+          rest[0],
+          parse_port(rest[1]),
+          parse_port(rest[2]),
+          rest[3],
+        )
       }
     "serve" =>
       cmd_serve(

@@ -4,6 +4,34 @@
 /// `gc` and `run`.
 
 ///|
+/// Write secret `NAME=value` pairs into a 0600 env file for `docker run`.
+/// Values passed as `-e NAME=value` on the command line are visible in `ps`
+/// and in the Docker API for the life of the container; an env file keeps them
+/// out of the process list. The file is removed right after the run.
+async fn write_secret_env_file(entries : Array[(String, String)]) -> String? {
+  if entries.length() == 0 {
+    return None
+  }
+  let nonce = match @env.rand(8) {
+    Some(bytes) => hex_encode(bytes)
+    None => raise CliError::Failed(1, "cannot read random bytes")
+  }
+  ensure_dir(serbox_home()) catch {
+    _ => ()
+  }
+  let path = path_join(serbox_home(), ".env-\{nonce}")
+  let buf = StringBuilder()
+  for entry in entries {
+    let (key, value) = entry
+    buf.write_string("\{key}=\{value}\n")
+  }
+  write_secret(path, buf.to_string()) catch {
+    _ => raise CliError::Failed(1, "could not stage the secret environment")
+  }
+  Some(path)
+}
+
+///|
 /// The image a template starts from. Everything here is a public Docker Hub
 /// image, so a fresh server needs no registry of its own.
 pub fn template_image(template : String) -> String? {
@@ -169,14 +197,20 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
     box_home,
   ]
   let secrets = load_secrets()
+  let secret_entries : Array[(String, String)] = []
   for name in options.secrets {
     match secrets.get(name) {
-      Some(value) => {
-        args.push("-e")
-        args.push("\{name}=\{value}")
-      }
+      Some(value) => secret_entries.push((name, value))
       None => ()
     }
+  }
+  let env_file = write_secret_env_file(secret_entries)
+  match env_file {
+    Some(path) => {
+      args.push("--env-file")
+      args.push(path)
+    }
+    None => ()
   }
   for key, value in options.env {
     args.push("-e")
@@ -187,6 +221,10 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
     args.push("\{port.host}:\{port.container}")
   }
   let result = run_container(options.name, image, args)
+  match env_file {
+    Some(path) => @fs.remove(path, allow_missing=true) catch { _ => () }
+    None => ()
+  }
   if result.code != 0 {
     raise CliError::Failed(
       75,
@@ -203,15 +241,20 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
   config.env = options.env
   config.meta = options.meta
   config.ports = options.ports
+  config.secrets = options.secrets
+  config.running_since = now_secs()
   config.auto_suspend_secs = options.auto_suspend_secs
   config.delete_at = options.delete_at
   config.last_used_at = now_secs()
   save_box(config) catch {
-    _ =>
+    _ => {
+      // An untracked container would block the name forever, so undo it.
+      let _ = remove_container(config.name)
       raise CliError::Failed(
         1,
         "the box started but its record could not be written to \{box_config_path(config.name)}",
       )
+    }
   }
   config
 }
@@ -255,6 +298,9 @@ pub async fn cmd_create(args : Args) -> Unit {
   let env : Map[String, String] = Map([])
   for text in args.all("env") {
     let (key, value) = parse_assignment(text, "env")
+    if !valid_env_key(key) {
+      raise usage_error("bad --env name '\{key}' (letters, digits and _)")
+    }
     env.set(key, value)
   }
   for file in args.all("env-file") {
@@ -500,17 +546,60 @@ pub async fn cmd_rename(args : Args) -> Unit {
       "could not rename the container: \{renamed.err.trim().to_owned()}",
     )
   }
-  @fs.remove(box_config_path(config.name), allow_missing=true) catch {
-    _ => ()
-  }
+  // Record the new name before dropping the old one: a failed write must not
+  // leave the renamed container without any record.
+  let old_name = config.name
   config.name = new_name
   save_box(config) catch {
-    _ => ()
+    _ =>
+      raise CliError::Failed(
+        1,
+        "the container was renamed but its record could not be written; the old record is still at \{box_config_path(old_name)}",
+      )
   }
+  delete_box_config(old_name)
+  migrate_box_records(old_name, new_name)
   if json_only(@json.to_json(config)) {
     return
   }
   line("renamed to \{new_name}")
+}
+
+///|
+/// Moves the records that are keyed by box name: published ports, background
+/// jobs and command history. Without this, a rename would leave forwarders
+/// running for a name no command can reach any more.
+async fn migrate_box_records(old_name : String, new_name : String) -> Unit {
+  for forward in all_port_forwards() {
+    if forward.box == old_name {
+      let old_path = port_record_path(old_name, forward.container)
+      forward.box = new_name
+      save_port_forward(forward) catch {
+        _ => ()
+      }
+      @fs.remove(old_path, allow_missing=true) catch {
+        _ => ()
+      }
+    }
+  }
+  let old_jobs = job_dir(old_name)
+  let jobs_exist = @fs.exists(old_jobs) catch { _ => false }
+  if jobs_exist {
+    @fs.rename(old_jobs, job_dir(new_name), replace=true) catch {
+      _ => ()
+    }
+  }
+  let old_history = path_join(history_dir(), "\{old_name}.jsonl")
+  let history_exists = @fs.exists(old_history) catch { _ => false }
+  if history_exists {
+    @fs.rename(
+      old_history,
+      path_join(history_dir(), "\{new_name}.jsonl"),
+      replace=true,
+    ) catch {
+      _ => ()
+    }
+  }
 }
 
 ///|
@@ -549,12 +638,14 @@ pub async fn cmd_rm(args : Args) -> Unit {
     _ => ()
   }
   let removed = remove_container(config.name)
-  if removed.code != 0 {
+  if removed.code != 0 && container_state(config.name) != "missing" {
     raise CliError::Failed(
       1,
       "could not remove the container: \{removed.err.trim().to_owned()}",
     )
   }
+  // A box whose container vanished (host reboot, manual docker rm) still has
+  // a record; `rm` has to clean that up too, or the name is stuck forever.
   delete_box_config(config.name)
   if json_only(
       @json.Json::object(Map([("removed", @json.Json::string(config.name))])),
@@ -583,6 +674,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
         )
       }
       config.paused_by = ""
+      config.running_since = now_secs()
       touch_box(config) catch {
         _ => ()
       }
@@ -596,6 +688,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
         )
       }
       config.paused_by = ""
+      config.running_since = 0L
       save_box(config) catch {
         _ => ()
       }
@@ -616,6 +709,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
         )
       }
       config.paused_by = "user"
+      config.running_since = 0L
       save_box(config) catch {
         _ => ()
       }
@@ -631,6 +725,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
           )
         }
         config.paused_by = ""
+        config.running_since = now_secs()
         touch_box(config) catch {
           _ => ()
         }
@@ -648,6 +743,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
           )
         }
         config.paused_by = ""
+        config.running_since = now_secs()
         touch_box(config) catch {
           _ => ()
         }
@@ -662,6 +758,7 @@ pub async fn cmd_lifecycle(command : String, args : Args) -> Unit {
         )
       }
       config.paused_by = ""
+      config.running_since = now_secs()
       touch_box(config) catch {
         _ => ()
       }
@@ -706,13 +803,9 @@ pub async fn cmd_max_run(args : Args) -> Unit {
   let minutes = @string.parse_int(text) catch {
     _ => raise usage_error("bad minutes '\{text}'")
   }
-  if minutes < 0 {
-    config.max_run_secs = 0L
-  } else if minutes == 0 {
-    let paused = pause_container(config.name)
-    if paused.code == 0 {
-      config.paused_by = "user"
-    }
+  // `0` (or a negative value) turns the limit off. Pausing immediately was a
+  // surprise: this command configures the limit, it does not pause the box.
+  if minutes <= 0 {
     config.max_run_secs = 0L
   } else {
     config.max_run_secs = minutes.to_int64() * 60L
@@ -732,12 +825,12 @@ pub async fn cmd_resize(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
   let cpus = args.value("cpus")
   let memory = args.value("memory")
+  if args.value("disk") is Some(_) {
+    raise CliError::Failed(
+      1, "--disk is not supported: a Docker box has no separate data disk to grow",
+    )
+  }
   if cpus is None && memory is None {
-    if args.value("disk") is Some(_) {
-      raise CliError::Failed(
-        1, "--disk is not supported: a Docker box has no separate data disk to grow",
-      )
-    }
     raise usage_error("resize needs --cpus and/or --memory")
   }
   let cmd : Array[String] = ["update"]
@@ -853,6 +946,30 @@ pub async fn cmd_gc(args : Args) -> Unit {
       )
       continue
     }
+    if config.max_run_secs > 0L &&
+      config.running_since > 0L &&
+      now - config.running_since >= config.max_run_secs {
+      if !dry {
+        let paused = pause_container(config.name)
+        if paused.code != 0 {
+          continue
+        }
+        config.paused_by = "auto"
+        config.running_since = 0L
+        save_box(config) catch {
+          _ => ()
+        }
+      }
+      actions.push(
+        @json.Json::object(
+          Map([
+            ("box", @json.Json::string(config.name)),
+            ("action", @json.Json::string("max-run")),
+          ]),
+        ),
+      )
+      continue
+    }
     if config.auto_suspend_secs <= 0L {
       continue
     }
@@ -911,6 +1028,9 @@ pub async fn cmd_run(args : Args) -> Unit {
   let env : Map[String, String] = Map([])
   for text in args.all("env") {
     let (key, value) = parse_assignment(text, "env")
+    if !valid_env_key(key) {
+      raise usage_error("bad --env name '\{key}' (letters, digits and _)")
+    }
     env.set(key, value)
   }
   let config = create_box({
@@ -944,12 +1064,20 @@ pub async fn cmd_run(args : Args) -> Unit {
         Some(_) => ()
         None => ()
       }
+      let timeout = match args.value("timeout") {
+        Some(text) =>
+          match parse_duration(text, default_unit_secs=1L) {
+            Some(secs) if secs > 0L && secs <= 600L => Some(secs)
+            _ => raise usage_error("bad --timeout '\{text}'")
+          }
+        None => None
+      }
       code = exec_box_batch(
         config.name,
         argv,
         args.value("cwd"),
         env,
-        None,
+        timeout,
         shell=config.shell,
       )
     }

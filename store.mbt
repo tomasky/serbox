@@ -39,6 +39,9 @@ pub(all) struct BoxConfig {
   mut paused_by : String
   /// Last time a command touched the box, for the idle check.
   mut last_used_at : Int64
+  /// When the box last started running, for the `max-run` limit. `0` when it
+  /// is not running.
+  mut running_since : Int64
   /// Delete the box at this time. `0` keeps it.
   mut delete_at : Int64
   /// Exit status of the last `--setup-file` run, `-1` before any.
@@ -131,6 +134,7 @@ pub fn new_box_config(
     max_run_secs: 0L,
     paused_by: "",
     last_used_at: now_secs(),
+    running_since: 0L,
     delete_at: 0L,
     setup_exit: -1,
   }
@@ -287,6 +291,7 @@ pub fn display_state(container_state : String, paused_by : String) -> String {
     "exited" | "created" => "stopped"
     "restarting" => "restarting"
     "missing" => "lost"
+    "unknown" => "unknown"
     _ => container_state
   }
 }
@@ -306,6 +311,7 @@ pub async fn box_blocked_reason(config : BoxConfig, wake : Bool) -> String? {
         let r = unpause_container(config.name)
         if r.code == 0 {
           config.paused_by = ""
+          config.running_since = now_secs()
           touch_box(config) catch {
             _ => ()
           }
@@ -328,6 +334,8 @@ pub async fn box_blocked_reason(config : BoxConfig, wake : Bool) -> String? {
       Some(
         "box '\{config.name}' has no container; run `serbox rm \{config.name}`",
       )
+    "unknown" =>
+      Some("the docker daemon is not answering; check it with `serbox doctor`")
     _ => None
   }
 }

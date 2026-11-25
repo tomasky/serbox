@@ -1,5 +1,5 @@
 {
-  "name": "serbox",
+  "name": "@tomasko/serbox",
   "version": "0.1.0",
   "description": "Linux boxes for agents, on your own server: create, exec, copy, snapshot and forward ports into isolated Docker boxes, with no account and no API key.",
   "license": "Apache-2.0",
@@ -26,10 +26,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kupas/serbox.git"
+    "url": "https://github.com/tomasky/serbox.git"
   },
-  "homepage": "https://github.com/kupas/serbox",
-  "bugs": "https://github.com/kupas/serbox/issues",
+  "homepage": "https://github.com/tomasky/serbox",
+  "bugs": "https://github.com/tomasky/serbox/issues",
   "keywords": [
     "serbox",
     "instabox",

@@ -38,6 +38,11 @@ pub async fn cmd_doctor(args : Args) -> Unit {
     },
   })
   let home = serbox_home()
+  // A fresh host has no state directory yet; creating it is exactly what the
+  // first real command would do, so doctor should not call that a failure.
+  ensure_dir(home) catch {
+    _ => ()
+  }
   let writable = probe_home(home)
   checks.push({
     name: "state directory",
@@ -168,13 +173,13 @@ pub async fn cmd_update(args : Args) -> Unit {
   let json = @json.Json::object(
     Map([
       ("version", @json.Json::string(serbox_version)),
-      ("command", @json.Json::string("npm install -g serbox@latest")),
+      ("command", @json.Json::string("npm install -g @tomasko/serbox@latest")),
     ]),
   )
   if json_only(json) {
     return
   }
   line("serbox \{serbox_version}")
-  line("update with: npm install -g serbox@latest")
-  line("or run:     npx serbox@latest")
+  line("update with: npm install -g @tomasko/serbox@latest")
+  line("or run:     npx @tomasko/serbox@latest")
 }

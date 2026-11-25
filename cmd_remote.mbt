@@ -153,7 +153,7 @@ async fn serve_connection(conn : @socket.Tcp) -> Unit {
   let installed_exists = @fs.exists(installed) catch { _ => false }
   let exe = if installed_exists { installed } else { "/proc/self/exe" }
 
-  let exit_box : ExitBox = { code: 1, }
+  let exit_box : ExitBox = { code: 1, message: "", }
   @async.with_task_group(async fn(group) {
     group.spawn_bg(async fn() {
       let process = @process.spawn(
@@ -196,6 +196,7 @@ async fn serve_connection(conn : @socket.Tcp) -> Unit {
 /// the code that reports it. MoonBit closures cannot close over a `mut` local.
 priv struct ExitBox {
   mut code : Int32
+  mut message : String
 }
 
 ///|
@@ -319,7 +320,10 @@ pub async fn serve_loop(bind : String, port : Int32) -> Unit {
     _ => raise CliError::Failed(2, "bad bind address '\{bind}:\{port}'")
   }
   let server = @socket.TcpServer(addr, reuse_addr=true)
-  @signal.set_global_cancellation_signals([@signal.SIGTERM, @signal.SIGINT])
+  @core_signal.set_global_cancellation_signals([
+    @core_signal.SIGTERM,
+    @core_signal.SIGINT,
+  ])
   server.run_forever(async fn(conn, _peer) {
     serve_connection(conn) catch {
       _ => ()
@@ -333,10 +337,15 @@ pub async fn serve_loop(bind : String, port : Int32) -> Unit {
 /// `serbox serve [--port N] [--bind ADDR] [--ensure] [--daemon] [--print-token]`
 pub async fn cmd_serve(args : Args) -> Unit {
   let port = match args.value("port") {
-    Some(text) =>
-      @string.parse_int(text) catch {
+    Some(text) => {
+      let port = @string.parse_int(text) catch {
         _ => raise usage_error("bad --port '\{text}'")
       }
+      if port <= 0 || port > 65535 {
+        raise usage_error("bad --port '\{text}' (1-65535)")
+      }
+      port
+    }
     None => DEFAULT_SERVE_PORT
   }
   let bind = match args.value("bind") {
@@ -368,7 +377,13 @@ pub async fn cmd_serve(args : Args) -> Unit {
       pid = find_daemon_pid(port)
     }
     if pid_alive(pid) {
-      let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
+      // A stale pid file can point at a recycled pid; never kill an unrelated
+      // process just because it wears the daemon's old number.
+      if is_serve_pid(pid) {
+        let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
+      } else {
+        pid = 0
+      }
     }
     // Wait for the listener to go away so the new daemon can bind.
     let mut waited = 0
@@ -457,13 +472,41 @@ async fn find_daemon_pid(port : Int32) -> Int32 {
       Some(text) => text
       None => continue
     }
-    if cmdline.contains("serve") &&
-      cmdline.contains("--daemon") &&
-      cmdline.contains(want) {
+    let args : Array[String] = []
+    for part in cmdline.split("\u{0}") {
+      args.push(part.to_owned())
+    }
+    let mut daemon = false
+    let mut port_arg = false
+    for i in 0..<args.length() {
+      if args[i] == "--daemon" {
+        daemon = true
+      }
+      if args[i] == "serve" {
+        daemon = true
+      }
+      if args[i] == "--port" && i + 1 < args.length() && args[i + 1] == want {
+        port_arg = true
+      }
+    }
+    if daemon && port_arg {
       return pid
     }
   }
   0
+}
+
+///|
+/// Whether `pid` is the serbox daemon for `port` (and not a recycled pid).
+async fn is_serve_pid(pid : Int32) -> Bool {
+  if !pid_alive(pid) {
+    return false
+  }
+  let cmdline = match read_text("/proc/\{pid}/cmdline") {
+    Some(text) => text
+    None => return false
+  }
+  cmdline.contains("--daemon") && cmdline.contains("--port")
 }
 
 ///|
@@ -484,7 +527,9 @@ async fn start_daemon(bind : String, port : Int32) -> Unit {
   // A daemon started from a deleted file (an upgrade) is replaced on restart.
   let exe_exists = @fs.exists(exe) catch { _ => false }
   let runnable = if exe_exists { exe } else { "/proc/self/exe" }
-  let pid = @process.spawn_orphan(
+  // The daemon writes its own pid file once it is up; writing the launcher's
+  // pid here would make `--restart` kill the wrong process.
+  let _ = @process.spawn_orphan(
     runnable,
     ["serve", "--daemon", "--port", "\{port}", "--bind", bind],
     stdout=log,
@@ -492,8 +537,6 @@ async fn start_daemon(bind : String, port : Int32) -> Unit {
   ) catch {
     _ => 0
   }
-  write_serve_pid(port)
-  let _ = pid
 }
 
 ///|
@@ -520,8 +563,27 @@ async fn pid_alive(pid : Int32) -> Bool {
   if pid <= 0 {
     return false
   }
-  @fs.exists("/proc/\{pid}") catch {
-    _ => false
+  // A killed-but-unreaped tunnel is a zombie: /proc/<pid> exists but the
+  // process is gone, and calling it alive would skip restarting the tunnel.
+  let exists = @fs.exists("/proc/\{pid}") catch { _ => false }
+  if !exists {
+    return false
+  }
+  match read_text("/proc/\{pid}/stat") {
+    Some(text) => {
+      let view = text.clamped_view()
+      match view.rev_find(")") {
+        Some(i) =>
+          if i + 2 < view.length() {
+            let state = view.get_char(i + 2).unwrap_or(' ')
+            state != 'Z'
+          } else {
+            true
+          }
+        None => true
+      }
+    }
+    None => true
   }
 }
 
@@ -551,7 +613,9 @@ fn remote_command(host : HostRecord, argv : Array[String]) -> String {
 
 ///|
 async fn ssh_capture(host : String, command : String) -> Captured {
-  capture_command("ssh", ["-o", "BatchMode=yes", host, command])
+  capture_command("ssh", [
+    "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, command,
+  ])
 }
 
 ///|
@@ -596,10 +660,17 @@ async fn start_tunnel(host : HostRecord) -> Unit {
     forward,
     host.target,
   ]
+  // The old tunnel may still hold the local port; give it a moment before the
+  // new one tries to bind, or ssh exits with "Address already in use".
+  let mut waited = 0
+  while local_port_open(host.local_port) && waited < 50 {
+    @async.sleep(100)
+    waited = waited + 1
+  }
   let pid = @process.spawn_orphan("ssh", argv, stdout=log, stderr=log) catch {
     _ => raise CliError::Failed(1, "could not start ssh to \{host.target}")
   }
-  if !wait_for_port(host.local_port, 100) {
+  if !wait_for_port(host.local_port, 100) || !pid_alive(pid) {
     raise CliError::Failed(
       1,
       "ssh tunnel to \{host.target} did not come up; see \{log_path}",
@@ -621,7 +692,11 @@ async fn start_tunnel(host : HostRecord) -> Unit {
 ///|
 async fn ensure_tunnel(host : HostRecord) -> Unit {
   if local_port_open(host.local_port) {
-    return
+    // A tunnel that died leaves the port free, but another process may have
+    // taken it. Only trust the port when our tunnel process is still ours.
+    if host.tunnel_pid <= 0 || pid_alive(host.tunnel_pid) {
+      return
+    }
   }
   start_tunnel(host)
 }
@@ -658,6 +733,20 @@ pub async fn remote_run(host_name : String, argv : Array[String]) -> Int32 {
 /// and the temp path is removed.
 async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
   let command = if argv.length() > 0 { argv[0] } else { "" }
+  if command == "cp" && argv.length() >= 3 {
+    // A remote `cp` touches a path on *this* machine, which the daemon cannot
+    // see. Translate it into the push/pull path that already goes over ssh.
+    match (remote_ref(argv[1]), remote_ref(argv[2])) {
+      (Some((box, path)), None) =>
+        return remote_files(host, ["pull", box, path, argv[2]])
+      (None, Some((box, path))) =>
+        return remote_files(host, ["push", box, argv[1], path])
+      (Some(_), Some(_)) =>
+        raise CliError::Failed(2, "cp copies between the host and one box")
+      (None, None) =>
+        raise CliError::Failed(2, "cp needs one side as BOX:/path")
+    }
+  }
   if command != "push" && command != "pull" {
     return None
   }
@@ -667,9 +756,10 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
       "host '\{host.name}' was added with --address, so push/pull cannot see its files; add it with ssh instead",
     )
   }
-  let stamp = hex_encode(
-    Bytes::from_array([(@env.now() % 1000000UL).to_int().to_byte()]),
-  )
+  let stamp = match @env.rand(8) {
+    Some(bytes) => hex_encode(bytes)
+    None => raise CliError::Failed(1, "cannot read random bytes")
+  }
   if command == "push" {
     if argv.length() < 3 {
       return None
@@ -678,7 +768,9 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
     if !(@fs.exists(source) catch { _ => false }) {
       return None
     }
-    let temp = "/tmp/serbox-push-\{stamp}"
+    // Keep the basename: the remote `push` would otherwise create a file
+    // named after the temp path instead of the file the user asked for.
+    let temp = "/tmp/serbox-push-\{stamp}-\{safe_basename(source)}"
     let uploaded = scp_to(host.target, source, temp)
     if uploaded.code != 0 {
       raise CliError::Failed(
@@ -734,6 +826,56 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
 }
 
 ///|
+/// Split `BOX:/path`. `None` when the argument is a plain local path.
+fn remote_ref(text : String) -> (String, String)? {
+  match text.clamped_view().find(":") {
+    Some(i) =>
+      if i > 0 && i + 1 < text.length() {
+        Some(
+          (
+            text.clamped_view().exact_view(start=0, end=i).to_owned(),
+            text
+            .clamped_view()
+            .exact_view(start=i + 1, end=text.length())
+            .to_owned(),
+          ),
+        )
+      } else {
+        None
+      }
+    None => None
+  }
+}
+
+///|
+/// Keep a basename safe for an scp remote path (old scp runs it through the
+/// remote shell, where spaces and metacharacters would split).
+fn safe_basename(path : String) -> String {
+  let base = path_basename(path)
+  let buf = StringBuilder()
+  for i in 0..<base.length() {
+    let c = base.get_char(i).unwrap_or(' ')
+    let ok = (c >= 'A' && c <= 'Z') ||
+      (c >= 'a' && c <= 'z') ||
+      (c >= '0' && c <= '9') ||
+      c == '.' ||
+      c == '_' ||
+      c == '-'
+    if ok {
+      buf.write_char(c)
+    } else {
+      buf.write_char('_')
+    }
+  }
+  let safe = buf.to_string()
+  if safe.length() == 0 || safe == "." || safe == ".." {
+    "file"
+  } else {
+    safe
+  }
+}
+
+///|
 async fn scp_to(
   target : String,
   source : String,
@@ -744,6 +886,8 @@ async fn scp_to(
     "-r",
     "-o",
     "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
     "-o",
     "StrictHostKeyChecking=accept-new",
     source,
@@ -762,6 +906,8 @@ async fn scp_from(
     "-r",
     "-o",
     "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
     "-o",
     "StrictHostKeyChecking=accept-new",
     "\{target}:\{source}",
@@ -792,8 +938,7 @@ async fn remote_exec(host : HostRecord, argv : Array[String]) -> Int32 {
   let conn = @socket.Tcp::connect(addr) catch {
     _ => raise CliError::Failed(1, "cannot reach the tunnel for '\{host.name}'")
   }
-  let wants_stdin = argv_has(argv, "--stdin") ||
-    (argv.length() > 0 && argv[0] == "ssh")
+  let wants_stdin = command_needs_stdin(argv)
   let auth = @json.Json::object(
     Map([("token", @json.Json::string(host.token))]),
   )
@@ -809,7 +954,7 @@ async fn remote_exec(host : HostRecord, argv : Array[String]) -> Int32 {
   conn.write(request.stringify() + "\n") catch {
     _ => raise CliError::Failed(1, "the remote daemon closed the connection")
   }
-  let code : ExitBox = { code: 1, }
+  let code : ExitBox = { code: 1, message: "", }
   @async.with_task_group(async fn(group) {
     if wants_stdin {
       group.spawn_bg(async fn() { pump_stdin_to_remote(conn) })
@@ -821,6 +966,9 @@ async fn remote_exec(host : HostRecord, argv : Array[String]) -> Int32 {
     read_remote_frames(conn, code)
   })
   conn.close()
+  if code.message.length() > 0 {
+    raise CliError::Failed(1, code.message)
+  }
   code.code
 }
 
@@ -830,13 +978,30 @@ fn is_interactive_command(command : String) -> Bool {
 }
 
 ///|
-fn argv_has(argv : Array[String], flag : String) -> Bool {
+fn command_needs_stdin(argv : Array[String]) -> Bool {
   for arg in argv {
-    if arg == flag {
+    if arg == "--stdin" {
       return true
     }
   }
-  false
+  // `ssh` can run a command without a tty, and `secrets set` reads its value
+  // from stdin. Both have to get the client's stdin through the tunnel.
+  let mut first = ""
+  let mut second = ""
+  for arg in argv {
+    if !arg.clamped_view().has_prefix("-") {
+      if first.length() == 0 {
+        first = arg
+      } else if second.length() == 0 {
+        second = arg
+        break
+      }
+    }
+  }
+  if first == "ssh" || first == "shell" {
+    return true
+  }
+  first == "secrets" && second == "set"
 }
 
 ///|
@@ -910,7 +1075,9 @@ async fn read_remote_frames(conn : @socket.Tcp, code : ExitBox) -> Unit {
         }
         match fields.get("error") {
           Some(@json.Json::String(message)) => {
-            eline("serbox: remote error: \{message}")
+            // Let main report this in the client's chosen format (JSON
+            // included) instead of printing a bare human line.
+            code.message = "remote error: \{message}"
             code.code = 1
             return
           }
@@ -931,6 +1098,8 @@ async fn ssh_interactive(host : HostRecord, argv : Array[String]) -> Int32 {
   @process.run("ssh", [
     "-t",
     "-o",
+    "ConnectTimeout=10",
+    "-o",
     "ServerAliveInterval=30",
     "-o",
     "StrictHostKeyChecking=accept-new",
@@ -943,6 +1112,11 @@ async fn ssh_interactive(host : HostRecord, argv : Array[String]) -> Int32 {
 /// `serbox host add NAME USER@HOST [--port N] [--install]`
 pub async fn cmd_host_add(args : Args) -> Unit {
   let name = args.arg(0, "host name")
+  if name == "local" {
+    raise usage_error(
+      "'local' is reserved for this machine; pick another host name",
+    )
+  }
   if !valid_box_name(name) {
     raise usage_error(
       "bad host name '\{name}' (lowercase letters, digits, _ and -)",
@@ -989,10 +1163,15 @@ pub async fn cmd_host_add(args : Args) -> Unit {
     None => {
       let target = args.arg(1, "user@host")
       let remote_port = match args.value("port") {
-        Some(text) =>
-          @string.parse_int(text) catch {
-            _ => raise usage_error("bad --port '\{text}'")
+        Some(text) => {
+          let port = @string.parse_int(text) catch {
+            _ => raise usage_error("bad --port '\{text}' (1-65535)")
           }
+          if port <= 0 || port > 65535 {
+            raise usage_error("bad --port '\{text}' (1-65535)")
+          }
+          port
+        }
         None => DEFAULT_SERVE_PORT
       }
       let found = ssh_capture(target, "command -v serbox || true")
@@ -1006,7 +1185,7 @@ pub async fn cmd_host_add(args : Args) -> Unit {
         }
         line("installing serbox on \{target}")
         let installed = ssh_capture(
-          target, "curl -LsSf https://raw.githubusercontent.com/kupas/serbox/main/install.sh | bash",
+          target, "curl -LsSf https://raw.githubusercontent.com/tomasky/serbox/main/install.sh | bash",
         )
         if installed.code != 0 {
           raise CliError::Failed(1, "install failed: \{installed.err.trim()}")
@@ -1078,11 +1257,31 @@ pub async fn cmd_host_add(args : Args) -> Unit {
       host
     }
   }
+  if record.target.trim().length() == 0 {
+    // An --address host has no tunnel to verify, so check the daemon directly:
+    // adding a host with a wrong token should fail now, not on first use.
+    let ok = serve_auth_ok(record.local_port, record.token) catch { _ => false }
+    if !ok {
+      raise CliError::Failed(
+        1,
+        "the daemon at 127.0.0.1:\{record.local_port} rejected this token",
+      )
+    }
+  }
   upsert_host(record)
   // Bring the tunnel up now, so `host add` either succeeds fully or fails with
   // a message while the user is still looking.
   if record.target.trim().length() > 0 {
-    start_tunnel(record)
+    start_tunnel(record) catch {
+      CliError::Failed(code, message) => {
+        let _ = delete_host(name)
+        raise CliError::Failed(code, message)
+      }
+      _ => {
+        let _ = delete_host(name)
+        raise CliError::Failed(1, "could not open the tunnel")
+      }
+    }
   }
   let saved = match load_host(name) {
     Some(host) => host
@@ -1112,6 +1311,12 @@ fn parse_address(text : String) -> (String, Int32) raise {
   }
   let port = @string.parse_int(parts[1]) catch {
     _ => raise usage_error("bad port in --address '\{text}'")
+  }
+  if port <= 0 || port > 65535 {
+    raise usage_error("bad port in --address '\{text}' (1-65535)")
+  }
+  if parts[0].length() == 0 {
+    raise usage_error("--address expects HOST:PORT")
   }
   (parts[0], port)
 }
@@ -1153,6 +1358,10 @@ pub async fn cmd_host_ls(_args : Args) -> Unit {
           ("target", @json.Json::string(host.target)),
           ("state", @json.Json::string(state)),
           ("port", @json.Json::number(host.local_port.to_double())),
+          (
+            "current",
+            @json.Json::boolean(current.length() > 0 && current == host.name),
+          ),
         ]),
       ),
     )

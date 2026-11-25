@@ -223,3 +223,46 @@ test "serve pid path is per port" {
   assert_true(@serbox.serve_pid_path(7001) != @serbox.serve_pid_path(7002))
   assert_true(@serbox.serve_pid_path(7001).has_suffix(".pid"))
 }
+
+///|
+test "durations reject overflow and combine units" {
+  assert_eq(@serbox.parse_duration("1h30m"), Some(5400L))
+  assert_eq(@serbox.parse_duration("45", default_unit_secs=1L), Some(45L))
+  assert_eq(@serbox.parse_duration("0"), Some(0L))
+  assert_true(@serbox.parse_duration("999999999999999999999") is None)
+  assert_true(@serbox.parse_duration("5x") is None)
+}
+
+///|
+test "truncating output never splits a UTF-8 character" {
+  assert_eq(@serbox.truncate_utf8("abc", 10), "abc")
+  assert_eq(@serbox.truncate_utf8("abc", 2), "ab")
+  // "é" is two bytes: one byte cannot hold it, three can hold "é" plus "a".
+  assert_eq(@serbox.truncate_utf8("éa", 1), "")
+  assert_eq(@serbox.truncate_utf8("éa", 3), "éa")
+}
+
+///|
+test "path_basename keeps directories meaningful" {
+  assert_eq(@serbox.path_basename("/a/b.txt"), "b.txt")
+  assert_eq(@serbox.path_basename("/"), "/")
+  assert_eq(@serbox.path_basename("a/"), "a")
+  assert_eq(@serbox.path_basename("b.txt"), "b.txt")
+}
+
+///|
+test "environment names are restricted to what a shell can export" {
+  assert_true(@serbox.valid_env_key("TOKEN"))
+  assert_true(@serbox.valid_env_key("_A1"))
+  assert_false(@serbox.valid_env_key("1A"))
+  assert_false(@serbox.valid_env_key("A B"))
+  assert_false(@serbox.valid_env_key("A=B"))
+  assert_false(@serbox.valid_env_key(""))
+}
+
+///|
+test "docker trouble is not mistaken for a deleted box" {
+  assert_eq(@serbox.display_state("missing", ""), "lost")
+  assert_eq(@serbox.display_state("unknown", ""), "unknown")
+  assert_eq(@serbox.display_state("paused", "auto"), "auto-paused")
+}

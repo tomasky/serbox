@@ -11,16 +11,16 @@ It is the local counterpart of [instabox](https://instabox.sh): the same box
 workflow, without the hosted service.
 
 ```bash
-npx serbox create --name dev
-npx serbox exec dev -- 'apt-get update && apt-get install -y ripgrep'
-npx serbox ssh dev
-npx serbox rm dev --yes
+npx @tomasko/serbox create --name dev
+npx @tomasko/serbox exec dev -- 'apt-get update && apt-get install -y ripgrep'
+npx @tomasko/serbox ssh dev
+npx @tomasko/serbox rm dev --yes
 ```
 
 ## Install
 
 ```bash
-npm install -g serbox      # or: npx serbox ...
+npm install -g @tomasko/serbox      # or: npx @tomasko/serbox ...
 ```
 
 The npm package is a launcher. It downloads the matching static binary from
@@ -32,7 +32,7 @@ Other ways:
 
 ```bash
 # install script
-curl -LsSf https://raw.githubusercontent.com/kupas/serbox/main/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/tomasky/serbox/main/install.sh | bash
 
 # from source (MoonBit)
 moon build --target native --release

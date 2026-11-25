@@ -75,7 +75,16 @@ pub async fn container_state(box : String) -> String {
     container_name(box),
   ])
   if r.code != 0 {
-    return "missing"
+    // "missing" means Docker answered and the container is gone; "unknown"
+    // means Docker itself failed. Conflating them would let a docker outage
+    // look like every box had been deleted.
+    let err = r.err
+    if err.contains("No such object") ||
+      err.contains("No such container") ||
+      err.contains("no such") {
+      return "missing"
+    }
+    return "unknown"
   }
   r.out.trim().to_owned()
 }
@@ -83,7 +92,8 @@ pub async fn container_state(box : String) -> String {
 ///|
 /// Whether a box's container exists at all.
 pub async fn container_exists(box : String) -> Bool {
-  container_state(box) != "missing"
+  let state = container_state(box)
+  state != "missing" && state != "unknown"
 }
 
 ///|

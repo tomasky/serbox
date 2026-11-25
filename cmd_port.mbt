@@ -12,7 +12,11 @@
 /// Whether a port is free to bind on this host.
 pub async fn port_free(port : Int32) -> Bool {
   let addr = @socket.Addr::parse("0.0.0.0:\{port}") catch { _ => return false }
-  let server = @socket.TcpServer(addr) catch { _ => return false }
+  // reuse_addr mirrors what the forwarder does, so a port that can be bound
+  // after a restart is not reported as busy because of TIME_WAIT.
+  let server = @socket.TcpServer(addr, reuse_addr=true) catch {
+    _ => return false
+  }
   server.close()
   true
 }
@@ -56,6 +60,7 @@ pub async fn run_forwarder(
   box : String,
   host_port : Int32,
   container_port : Int32,
+  bind : String,
 ) -> Unit {
   let ip = match container_ip(box) {
     Some(ip) => ip
@@ -65,8 +70,8 @@ pub async fn run_forwarder(
         "container '\{container_name(box)}' has no address",
       )
   }
-  let addr = @socket.Addr::parse("0.0.0.0:\{host_port}")
-  let server = @socket.TcpServer(addr)
+  let addr = @socket.Addr::parse("\{bind}:\{host_port}")
+  let server = @socket.TcpServer(addr, reuse_addr=true)
   server.run_forever(async fn(client, _peer) {
     let upstream = @socket.Tcp::connect_to_host(ip, port=container_port) catch {
       _ => {
@@ -91,8 +96,14 @@ pub async fn run_forwarder(
 /// The executable to re-launch for a forwarder: `/proc/self/exe`, so the npm
 /// launcher's downloaded binary is used rather than whatever is on `PATH`.
 pub async fn self_exe() -> String {
-  @fs.realpath("/proc/self/exe") catch {
-    _ => "serbox"
+  let path = @fs.realpath("/proc/self/exe") catch { _ => "serbox" }
+  // An upgraded binary may have been replaced on disk; the running inode is
+  // still executable through /proc/self/exe.
+  let exists = @fs.exists(path) catch { _ => false }
+  if exists {
+    path
+  } else {
+    "/proc/self/exe"
   }
 }
 
@@ -109,6 +120,7 @@ pub async fn publish_port(
   config : BoxConfig,
   container_port : Int32,
   host_port : Int32,
+  bind : String,
 ) -> PortForward {
   if container_state(config.name) != "running" {
     raise CliError::Failed(1, "box '\{config.name}' is not running")
@@ -140,7 +152,7 @@ pub async fn publish_port(
   }
   let pid = @process.spawn_orphan(
     exe,
-    ["__forward", config.name, "\{host}", "\{container_port}"],
+    ["__forward", config.name, "\{host}", "\{container_port}", bind],
     stdout=log,
     stderr=log,
   ) catch {
@@ -154,15 +166,37 @@ pub async fn publish_port(
     created_at: now_secs(),
   }
   save_port_forward(forward) catch {
-    _ => ()
+    _ => {
+      let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
+      raise CliError::Failed(1, "could not record the published port")
+    }
   }
   // Give the listener a moment to bind so `port ls` and a curl right after
-  // `publish` do not race it.
+  // `publish` do not race it. A forwarder that dies (address in use, bad
+  // container address) must fail the publish, not leave a dead record.
+  let mut ready = false
   for _ in 0..<20 {
     @async.sleep(50)
-    if !port_free(host) {
+    if !process_alive(pid) {
       break
     }
+    if !port_free(host) {
+      ready = true
+      break
+    }
+  }
+  if !ready {
+    let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
+    @fs.remove(
+      port_record_path(config.name, container_port),
+      allow_missing=true,
+    ) catch {
+      _ => ()
+    }
+    raise CliError::Failed(
+      1,
+      "the port forwarder for \{host} did not start; see \{log_path}",
+    )
   }
   forward
 }
@@ -174,9 +208,7 @@ pub async fn unpublish_port(box : String, container_port : Int32) -> Unit {
     Some(forward) => forward
     None => raise CliError::Failed(4, "port \{container_port} is not published")
   }
-  if process_alive(forward.pid) {
-    ignore(@process.run("kill", ["-TERM", "\{forward.pid}"]) catch { _ => 0 })
-  }
+  await_forwarder_stop(forward.pid)
   @fs.remove(port_record_path(box, container_port), allow_missing=true) catch {
     _ => ()
   }
@@ -188,17 +220,28 @@ pub async fn unpublish_port(box : String, container_port : Int32) -> Unit {
 pub async fn unpublish_box_ports(box : String) -> Unit {
   for forward in all_port_forwards() {
     if forward.box == box {
-      if process_alive(forward.pid) {
-        ignore(
-          @process.run("kill", ["-TERM", "\{forward.pid}"]) catch {
-            _ => 0
-          },
-        )
-      }
+      await_forwarder_stop(forward.pid)
       @fs.remove(port_record_path(box, forward.container), allow_missing=true) catch {
         _ => ()
       }
     }
+  }
+}
+
+///|
+/// Stop a forwarder: SIGTERM, then SIGKILL if it is still there after a second.
+async fn await_forwarder_stop(pid : Int32) -> Unit {
+  if !process_alive(pid) {
+    return
+  }
+  let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
+  let mut waited = 0
+  while process_alive(pid) && waited < 20 {
+    @async.sleep(50)
+    waited = waited + 1
+  }
+  if process_alive(pid) {
+    let _ = @process.run("kill", ["-KILL", "\{pid}"]) catch { _ => 0 }
   }
 }
 
@@ -215,7 +258,14 @@ pub async fn cmd_port(args : Args) -> Unit {
         Some(text) => parse_port(text)
         None => container_port
       }
-      let forward = publish_port(config, container_port, host_port)
+      if args.value("host") is Some(_) && !port_free(host_port) {
+        raise CliError::Failed(
+          1,
+          "host port \{host_port} is already in use; pick another with --host",
+        )
+      }
+      let bind = if args.flag("private") { "127.0.0.1" } else { "0.0.0.0" }
+      let forward = publish_port(config, container_port, host_port, bind)
       if json_only(@json.to_json(forward)) {
         return
       }

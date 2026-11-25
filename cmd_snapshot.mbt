@@ -54,9 +54,30 @@ pub async fn cmd_snapshot(args : Args) -> Unit {
 }
 
 ///|
+
+///|
+/// Snapshotting and forking only need the container to exist: `docker commit`
+/// works on a stopped box, and refusing there would block the obvious way to
+/// save a box before it is booted again.
+async fn require_committable(config : BoxConfig) -> Unit {
+  match container_state(config.name) {
+    "missing" =>
+      raise CliError::Failed(
+        4,
+        "box '\{config.name}' has no container; run `serbox rm \{config.name}`",
+      )
+    "unknown" =>
+      raise CliError::Failed(
+        1, "the docker daemon is not answering; run `serbox doctor`",
+      )
+    _ => ()
+  }
+}
+
+///|
 async fn snapshot_save(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(1, "box name"))
-  require_usable(config, false)
+  require_committable(config)
   let name = match args.value("name") {
     Some(name) => name
     None => "\{config.name}-\{compact_time(now_secs())}"
@@ -154,6 +175,9 @@ async fn snapshot_import(args : Args) -> Unit {
   if !valid_snapshot_name(name) {
     raise usage_error("bad snapshot name '\{name}'")
   }
+  if load_snapshot(name) is Some(_) {
+    raise CliError::Failed(1, "snapshot '\{name}' already exists")
+  }
   if !image_exists(image) {
     if !pull_image(image) {
       raise CliError::Failed(75, "could not pull image '\{image}'")
@@ -170,7 +194,7 @@ async fn snapshot_import(args : Args) -> Unit {
     },
   }
   save_snapshot(snapshot) catch {
-    _ => ()
+    _ => raise CliError::Failed(1, "could not record the snapshot")
   }
   if json_only(@json.to_json(snapshot)) {
     return
@@ -212,7 +236,7 @@ async fn snapshot_restore(args : Args) -> Unit {
     }
   }
   let removed = remove_container(config.name)
-  if removed.code != 0 {
+  if removed.code != 0 && container_state(config.name) != "missing" {
     raise CliError::Failed(
       1,
       "could not stop the box: \{removed.err.trim().to_owned()}",
@@ -230,11 +254,31 @@ async fn snapshot_restore(args : Args) -> Unit {
     args_run.push("-e")
     args_run.push("\{key}=\{value}")
   }
+  let stored = load_secrets()
+  let secret_entries : Array[(String, String)] = []
+  for name in config.secrets {
+    match stored.get(name) {
+      Some(value) => secret_entries.push((name, value))
+      None => ()
+    }
+  }
+  let env_file = write_secret_env_file(secret_entries)
+  match env_file {
+    Some(path) => {
+      args_run.push("--env-file")
+      args_run.push(path)
+    }
+    None => ()
+  }
   for port in config.ports {
     args_run.push("-p")
     args_run.push("\{port.host}:\{port.container}")
   }
   let started = run_container(config.name, snapshot.image, args_run)
+  match env_file {
+    Some(path) => @fs.remove(path, allow_missing=true) catch { _ => () }
+    None => ()
+  }
   if started.code != 0 {
     raise CliError::Failed(
       1,
@@ -242,6 +286,7 @@ async fn snapshot_restore(args : Args) -> Unit {
     )
   }
   config.paused_by = ""
+  config.running_since = now_secs()
   touch_box(config) catch {
     _ => ()
   }
@@ -255,7 +300,7 @@ async fn snapshot_restore(args : Args) -> Unit {
 /// `serbox fork BOX [--count N] [--name N]`
 pub async fn cmd_fork(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  require_usable(config, false)
+  require_committable(config)
   let count = match args.value("count") {
     Some(text) =>
       @string.parse_int(text) catch {
@@ -302,17 +347,15 @@ pub async fn cmd_fork(args : Args) -> Unit {
       env: config.env,
       meta: config.meta,
       ports: [],
-      secrets: [],
+      secrets: config.secrets,
       auto_suspend_secs: config.auto_suspend_secs,
       delete_at: 0L,
     })
     created.push(@json.to_json(child))
-    if !json_only(@json.to_json(child)) {
+    if !json_requested() {
       line("created \{name} from \{config.name}")
     }
   }
   let _ = remove_image(image)
-  if json_only(@json.Json::array(created)) {
-    return
-  }
+  let _ = json_only(@json.Json::array(created))
 }
