@@ -7,10 +7,12 @@ metadata:
 
 # serbox CLI
 
-`serbox` runs disposable Linux boxes as Docker containers on the machine where it
-is installed. There is no account and no hosted service: `serbox` talks to the
-local Docker daemon, keeps its state under `~/.serbox` (override with
-`SERBOX_HOME`), and works the same on any Linux server.
+`serbox` runs disposable Linux boxes as containers on the machine where it is
+installed. There is no account and no hosted service: `serbox` talks to the
+local Docker or Podman engine, keeps its state under `~/.serbox` (override with
+`SERBOX_HOME`), and works the same on any Linux server. Set
+`SERBOX_RUNTIME=podman` to use Podman; otherwise Docker is preferred and Podman
+is the fallback.
 
 A box has a writable root filesystem and a persistent `/data` disk. `HOME` is
 `/data/home`, so files under `/data` survive pause, resume, snapshot and fork.
@@ -35,7 +37,7 @@ serbox create --name work --template ubuntu --publish 3000 --secrets TOKEN
 serbox ls                                         # state, template, age
 serbox get work --json                            # one box as JSON
 serbox templates                                  # known image aliases
-serbox doctor                                     # Docker and state checks
+serbox doctor                                     # runtime and state checks
 ```
 
 `create` waits until the box accepts commands unless `--no-wait` is given.

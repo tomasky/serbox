@@ -2,7 +2,7 @@
 
 Linux boxes for agents — on your own server.
 
-`serbox` creates small, disposable Docker boxes on the machine it runs on, then
+`serbox` creates small, disposable Linux boxes on the machine it runs on, then
 gives you one command to run things inside them, copy files in and out, pause
 them, snapshot them and forward their ports. No account, no API key, no control
 plane: the server you already have is the control plane.
@@ -40,16 +40,39 @@ moon build --target native --release
 ```
 
 Supported targets: `linux-x86_64`, `linux-aarch64`. serbox is meant to run on
-the Linux server that owns the boxes; on macOS use a Linux VM or Docker
-Desktop's Linux engine.
+the Linux server that owns the boxes; on macOS use a Linux VM.
 
 ## Requirements
 
-- Linux with Docker (the `docker` CLI and a reachable daemon)
-- Permission to talk to the daemon (`docker` group or root)
+- Linux with **Docker or Podman** (the CLI and a reachable daemon/engine)
+- Permission to talk to it (`docker` group, root, or a rootless Podman setup)
 - Nothing else — no Python, no runtime, no account
 
-`serbox doctor` checks all of this and says what is missing.
+`serbox doctor` checks the runtime it selected and says what is missing.
+
+### Docker or Podman
+
+serbox uses Docker when it is installed. To use Podman instead, set
+`SERBOX_RUNTIME=podman`; if Docker is absent, Podman is picked automatically.
+
+```bash
+SERBOX_RUNTIME=podman serbox create --name dev --template alpine
+SERBOX_RUNTIME=podman serbox doctor
+```
+
+Everything uses the same CLI, including create, exec, files, snapshots, fork,
+pause and the remote `serve` daemon. Two Podman differences matter:
+
+- **Rootless Podman** keeps the box on a private network, so a host-side
+  forwarder cannot reach it. Publish ports when creating the box
+  (`create --publish 3000:8080`); `port publish` on a running box explains this
+  instead of leaving a dead forwarder.
+- **Short image names** can trigger Podman's interactive short-name prompt.
+  Built-in templates are fully qualified (`docker.io/library/...`); for
+  `--image`, pass a full reference such as `docker.io/library/alpine:3.20`.
+
+Podman also works rootful with its default bridge network; that is the setup
+closest to Docker.
 
 ## A box in one minute
 
@@ -226,7 +249,8 @@ secrets.json credentials (0600)
 ```
 
 Deleting that directory loses serbox's view of the boxes, not the containers;
-`serbox doctor` and `docker ps -a --filter label=serbox.managed=1` help recover.
+`serbox doctor` and `docker ps -a --filter label=serbox.managed=1` (or
+`podman ps -a --filter label=serbox.managed=1`) help recover.
 
 ## How it differs from instabox
 
@@ -234,8 +258,8 @@ Deleting that directory loses serbox's view of the boxes, not the containers;
 | --- | --- | --- |
 | where boxes run | the server you run it on | instabox's cloud |
 | account | none | sign in / API key |
-| isolation | Docker on your kernel | microVM |
-| snapshots | `docker commit` images | VM snapshots |
+| isolation | Docker/Podman on your kernel | microVM |
+| snapshots | `commit` images | VM snapshots |
 | port URLs | your server's host and port | public URLs |
 | offline | yes (after images are pulled) | no |
 

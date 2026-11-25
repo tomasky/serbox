@@ -68,7 +68,7 @@ async fn require_committable(config : BoxConfig) -> Unit {
       )
     "unknown" =>
       raise CliError::Failed(
-        1, "the docker daemon is not answering; run `serbox doctor`",
+        1, "the container runtime is not answering; run `serbox doctor`",
       )
     _ => ()
   }
@@ -247,8 +247,6 @@ async fn snapshot_restore(args : Args) -> Unit {
     "HOME=\{box_home}",
     "-e",
     "SERBOX_BOX=\{config.name}",
-    "-w",
-    box_home,
   ]
   for key, value in config.env {
     args_run.push("-e")

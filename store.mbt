@@ -335,7 +335,9 @@ pub async fn box_blocked_reason(config : BoxConfig, wake : Bool) -> String? {
         "box '\{config.name}' has no container; run `serbox rm \{config.name}`",
       )
     "unknown" =>
-      Some("the docker daemon is not answering; check it with `serbox doctor`")
+      Some(
+        "the container runtime is not answering; check it with `serbox doctor`",
+      )
     _ => None
   }
 }

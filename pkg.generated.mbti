@@ -149,6 +149,8 @@ pub fn container_name(String) -> String
 
 pub let container_prefix : String
 
+pub async fn container_runtime() -> String
+
 pub async fn container_state(String) -> String
 
 pub async fn container_stats(String) -> @json.Json?
@@ -338,6 +340,8 @@ pub async fn run_container(String, String, Array[String]) -> DockerResult
 pub async fn run_forwarder(String, Int32, Int32, String) -> Unit
 
 pub async fn run_setup_file(BoxConfig, String, Bool) -> Unit
+
+pub async fn runtime_rootless() -> Bool
 
 pub async fn save_box(BoxConfig) -> Unit
 

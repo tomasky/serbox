@@ -1,11 +1,14 @@
 ///|
-/// The Docker backend.
+/// The container backend: Docker by default, Podman when asked.
 ///
-/// A box is one Docker container, and Docker is the isolation serbox does not
+/// A box is one container, and the runtime is the isolation serbox does not
 /// want to reimplement: namespaces, cgroups, filesystem layers, pause/resume
-/// and `commit`-based snapshots all come from it. Nothing here talks to the
-/// Docker API directly; every call is the `docker` CLI, so any Docker
-/// installation that works from a shell works under serbox.
+/// and `commit`-based snapshots all come from it. Nothing here talks to a
+/// daemon API directly; every call is a CLI, so any Docker-compatible runtime
+/// that works from a shell works under serbox.
+///
+/// Set `SERBOX_RUNTIME=podman` to use Podman even when Docker is installed.
+/// Without it, Docker is preferred and Podman is the fallback.
 
 ///|
 /// The result of a captured command: status, standard output and standard
@@ -23,14 +26,48 @@ fn decode_data(data : &@io.Data) -> String {
 }
 
 ///|
-/// Run `docker <args>` and collect its output.
+/// The container runtime to use: `SERBOX_RUNTIME`, else Docker when present,
+/// else Podman. Both speak the same CLI for everything serbox needs.
+pub async fn container_runtime() -> String {
+  match @env.get_env_var("SERBOX_RUNTIME") {
+    Some(value) => {
+      let name = value.trim().to_owned()
+      if name == "docker" || name == "podman" {
+        return name
+      }
+    }
+    None => ()
+  }
+  for
+    path in [
+      "/usr/bin/docker", "/usr/local/bin/docker", "/bin/docker", "/snap/bin/docker",
+    ] {
+    let found = @fs.exists(path) catch { _ => false }
+    if found {
+      return "docker"
+    }
+  }
+  for path in ["/usr/bin/podman", "/usr/local/bin/podman", "/bin/podman"] {
+    let found = @fs.exists(path) catch { _ => false }
+    if found {
+      return "podman"
+    }
+  }
+  // Nothing found: keep the historical default so the error names Docker, and
+  // `SERBOX_RUNTIME=podman` remains the way to get a Podman-specific message.
+  "docker"
+}
+
+///|
+/// Run `<runtime> <args>` and collect its output.
 pub async fn docker_capture(args : Array[String]) -> DockerResult {
-  let result = @process.collect_output("docker", args) catch {
+  let runtime = container_runtime()
+  let result = @process.collect_output(runtime, args) catch {
     _ =>
       return {
         code: 127,
         out: "",
-        err: "could not run the docker CLI; is Docker installed?",
+        err: "could not run the \{runtime} CLI; is it installed?",
       }
   }
   let (code, out, err) = result
@@ -38,19 +75,47 @@ pub async fn docker_capture(args : Array[String]) -> DockerResult {
 }
 
 ///|
-/// Run `docker <args>` with this process's stdio, so pull progress and
+/// Run `<runtime> <args>` with this process's stdio, so pull progress and
 /// interactive shells reach the terminal.
 pub async fn docker_inherit(args : Array[String]) -> Int32 {
-  @process.run("docker", args) catch {
+  let runtime = container_runtime()
+  @process.run(runtime, args) catch {
     _ => 127
   }
 }
 
 ///|
-/// Whether the Docker daemon answers.
+/// Whether Podman runs without root. Rootless Podman keeps the container on a
+/// private network namespace, so a host-side forwarder cannot reach it; ports
+/// then have to be published when the box is created.
+pub async fn runtime_rootless() -> Bool {
+  if container_runtime() != "podman" {
+    return false
+  }
+  let r = docker_capture(["info", "--format", "{{.Host.Security.Rootless}}"])
+  r.code == 0 && r.out.trim().to_owned() == "true"
+}
+
+///|
+/// Whether the container runtime answers. `info` is common to Docker and
+/// Podman and does not depend on a version field that differs between them.
 pub async fn docker_available() -> Bool {
-  let r = docker_capture(["info", "--format", "{{.ServerVersion}}"])
-  r.code == 0 && r.out.trim().to_owned().length() > 0
+  let r = docker_capture(["info"])
+  r.code == 0
+}
+
+///|
+/// Pulling a short image name asks Docker Hub for a namespace; on Podman that
+/// can become an interactive short-name prompt. Fully qualifying official
+/// images keeps pulls non-interactive.
+async fn pull_reference(image : String) -> String {
+  let runtime = container_runtime()
+  if runtime == "podman" &&
+    !image.contains("/") &&
+    !image.clamped_view().has_prefix("serbox-") {
+    return "docker.io/library/\{image}"
+  }
+  image
 }
 
 ///|
@@ -122,8 +187,9 @@ pub async fn image_exists(image : String) -> Bool {
 ///|
 /// Pull an image, showing progress on stderr the way Docker prints it.
 pub async fn pull_image(image : String) -> Bool {
-  @stdio.stderr.write("serbox: pulling \{image}\n")
-  docker_inherit(["pull", image]) == 0
+  let reference = pull_reference(image)
+  @stdio.stderr.write("serbox: pulling \{reference}\n")
+  docker_inherit(["pull", reference]) == 0
 }
 
 ///|
@@ -147,6 +213,16 @@ pub async fn run_container(
   args : Array[String],
 ) -> DockerResult {
   let cmd : Array[String] = ["run", "-d", "--name", container_name(box)]
+  // Nested or unusually configured hosts may not expose the pids controller;
+  // crun then refuses to start any container. Podman can run without cgroups,
+  // and the box still has namespaces, so use that instead of failing.
+  if container_runtime() == "podman" {
+    let controllers = read_text("/sys/fs/cgroup/cgroup.controllers")
+    match controllers {
+      Some(text) => if !text.contains("pids") { cmd.push("--cgroups=disabled") }
+      None => ()
+    }
+  }
   cmd.push("--hostname")
   cmd.push(box)
   cmd.push("--label")
@@ -256,7 +332,9 @@ pub async fn commit_container(box : String, image : String) -> DockerResult {
 ///|
 /// Remove an image.
 pub async fn remove_image(image : String) -> DockerResult {
-  docker_capture(["image", "rm", "-f", image])
+  // Not `-f`: Podman force-removes containers that still use the image, which
+  // would turn `snapshot rm` into deleting the boxes created from it.
+  docker_capture(["image", "rm", image])
 }
 
 ///|

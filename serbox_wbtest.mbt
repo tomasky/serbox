@@ -28,7 +28,7 @@ test "box templates are pinned to a digest-free tag" {
     assert_true(image.contains(":"))
     assert_true(!image.contains(":latest"))
   }
-  assert_eq(template_image("agent"), Some("node:22-bookworm"))
+  assert_eq(template_image("agent"), Some("docker.io/library/node:22-bookworm"))
 }
 
 ///|

@@ -14,7 +14,9 @@ GitHub Releases into `~/.cache/serbox`, verifies the published SHA-256, and
 execs it. There is no install script, so it works under `npm ci
 --ignore-scripts`, pnpm and `npx`.
 
-Requirements: Linux with a reachable Docker daemon. `serbox doctor` checks it.
+Requirements: Linux with a reachable Docker or Podman engine. `serbox doctor`
+checks it. Set `SERBOX_RUNTIME=podman` to use Podman; it is detected
+automatically when Docker is absent.
 
 `serbox` needs no account, API key or hosted service: it creates isolated
 Docker boxes on the machine it runs on and gives you `create`, `exec`, `ssh`,

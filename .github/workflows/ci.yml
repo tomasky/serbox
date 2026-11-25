@@ -84,6 +84,31 @@ jobs:
       - name: Runs on the oldest x86-64 CPU model
         run: qemu-x86_64 -cpu qemu64 dist/serbox-linux-x86_64 version
 
+  podman:
+    name: Podman backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Update registry index
+        run: moon update
+
+      - name: Build
+        run: moon build --target native --release
+
+      - name: Podman end-to-end
+        run: ./scripts/test-podman.sh _build/native/release/build/cmd/main/main.exe
+
   npm:
     name: npm launcher
     runs-on: ubuntu-24.04

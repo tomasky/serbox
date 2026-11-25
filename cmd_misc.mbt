@@ -14,29 +14,53 @@ pub struct Check {
 pub async fn cmd_doctor(args : Args) -> Unit {
   ignore(args)
   let checks : Array[Check] = []
+  let runtime = container_runtime()
   let cli = docker_capture(["--version"])
+  let install_hint = if runtime == "podman" {
+    "not found; install Podman (https://podman.io/docs/installation)"
+  } else {
+    "not found; install Docker (https://docs.docker.com/engine/install/)"
+  }
   checks.push({
-    name: "docker CLI",
+    name: "\{runtime} CLI",
     ok: cli.code == 0,
     detail: if cli.code == 0 {
       cli.out.trim().to_owned()
     } else {
-      "not found; install Docker (https://docs.docker.com/engine/install/)"
+      install_hint
     },
   })
-  let daemon = docker_capture([
-    "info", "--format", "{{.ServerVersion}}|{{.Driver}}",
-  ])
+  let daemon = docker_capture(["info"])
   let daemon_ok = daemon.code == 0
   checks.push({
-    name: "docker daemon",
+    name: "\{runtime} daemon",
     ok: daemon_ok,
     detail: if daemon_ok {
-      daemon.out.trim().to_owned()
+      if runtime == "podman" {
+        "reachable (set SERBOX_RUNTIME=podman to make this the default)"
+      } else {
+        "reachable"
+      }
+    } else if runtime == "podman" {
+      "unreachable; run `podman info` and check rootless setup"
     } else {
       "unreachable; is the service running and is this user in the docker group?"
     },
   })
+  if runtime == "podman" {
+    let controllers = read_text("/sys/fs/cgroup/cgroup.controllers")
+    match controllers {
+      Some(text) =>
+        if !text.contains("pids") {
+          checks.push({
+            name: "podman cgroups",
+            ok: true,
+            detail: "pids controller missing; boxes start with --cgroups=disabled, so pause and stats are unavailable",
+          })
+        }
+      None => ()
+    }
+  }
   let home = serbox_home()
   // A fresh host has no state directory yet; creating it is exactly what the
   // first real command would do, so doctor should not call that a failure.

@@ -253,6 +253,13 @@ pub async fn cmd_port(args : Args) -> Unit {
     "publish" => {
       let config = load_box_or_fail(args.arg(1, "box name"))
       require_usable(config, true)
+      if runtime_rootless() {
+        raise CliError::Failed(
+          1,
+          "rootless Podman cannot add a port to a running box; create it with " +
+          "`serbox create --publish PORT` or run Podman as root",
+        )
+      }
       let container_port = parse_port(args.arg(2, "port"))
       let host_port = match args.value("host") {
         Some(text) => parse_port(text)

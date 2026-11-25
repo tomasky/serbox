@@ -36,14 +36,14 @@ async fn write_secret_env_file(entries : Array[(String, String)]) -> String? {
 /// image, so a fresh server needs no registry of its own.
 pub fn template_image(template : String) -> String? {
   match template {
-    "default" | "debian" => Some("debian:bookworm-slim")
-    "ubuntu" => Some("ubuntu:24.04")
-    "alpine" => Some("alpine:3.20")
-    "node" => Some("node:22-bookworm")
-    "python" => Some("python:3.12-bookworm")
-    "go" | "golang" => Some("golang:1.23-bookworm")
-    "rust" => Some("rust:1.83-bookworm")
-    "agent" => Some("node:22-bookworm")
+    "default" | "debian" => Some("docker.io/library/debian:bookworm-slim")
+    "ubuntu" => Some("docker.io/library/ubuntu:24.04")
+    "alpine" => Some("docker.io/library/alpine:3.20")
+    "node" => Some("docker.io/library/node:22-bookworm")
+    "python" => Some("docker.io/library/python:3.12-bookworm")
+    "go" | "golang" => Some("docker.io/library/golang:1.23-bookworm")
+    "rust" => Some("docker.io/library/rust:1.83-bookworm")
+    "agent" => Some("docker.io/library/node:22-bookworm")
     _ => None
   }
 }
@@ -165,7 +165,7 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
   let docker_ok = docker_available()
   if !docker_ok {
     raise CliError::Failed(
-      1, "the docker daemon is not reachable; run `serbox doctor`",
+      1, "the container runtime is not reachable; run `serbox doctor`",
     )
   }
   if !valid_box_name(options.name) {
@@ -193,8 +193,6 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
     "HOME=\{box_home}",
     "-e",
     "SERBOX_BOX=\{options.name}",
-    "-w",
-    box_home,
   ]
   let secrets = load_secrets()
   let secret_entries : Array[(String, String)] = []
@@ -226,9 +224,15 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
     None => ()
   }
   if result.code != 0 {
+    // A failed `run` can still leave a created container behind (Podman does
+    // this when its network setup fails), and it would block the name forever.
+    let leftover = container_exists(options.name)
+    if leftover {
+      let _ = remove_container(options.name)
+    }
     raise CliError::Failed(
       75,
-      "docker could not start the box: \{result.err.trim().to_owned()}",
+      "the container runtime could not start the box: \{result.err.trim().to_owned()}",
     )
   }
   let config = new_box_config(options.name, options.template, image)
@@ -827,7 +831,7 @@ pub async fn cmd_resize(args : Args) -> Unit {
   let memory = args.value("memory")
   if args.value("disk") is Some(_) {
     raise CliError::Failed(
-      1, "--disk is not supported: a Docker box has no separate data disk to grow",
+      1, "--disk is not supported: a container box has no separate data disk to grow",
     )
   }
   if cpus is None && memory is None {

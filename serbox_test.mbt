@@ -200,8 +200,14 @@ test "ascii_lowercase leaves other characters alone" {
 
 ///|
 test "templates map to pinned images" {
-  assert_eq(@serbox.template_image("default"), Some("debian:bookworm-slim"))
-  assert_eq(@serbox.template_image("alpine"), Some("alpine:3.20"))
+  assert_eq(
+    @serbox.template_image("default"),
+    Some("docker.io/library/debian:bookworm-slim"),
+  )
+  assert_eq(
+    @serbox.template_image("alpine"),
+    Some("docker.io/library/alpine:3.20"),
+  )
   assert_eq(@serbox.template_image("nope"), None)
 }
 
@@ -289,4 +295,17 @@ test "all four bundled skills carry their guide and scripts" {
     }
   }
   assert_true(has_script)
+}
+
+///|
+test "built-in templates use fully qualified image references" {
+  assert_eq(
+    @serbox.template_image("alpine"),
+    Some("docker.io/library/alpine:3.20"),
+  )
+  assert_eq(
+    @serbox.template_image("ubuntu"),
+    Some("docker.io/library/ubuntu:24.04"),
+  )
+  assert_true(@serbox.template_image("nope") is None)
 }
