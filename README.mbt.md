@@ -287,7 +287,7 @@ Releases are cut from a tag:
 
 ```bash
 # bump the version in moon.mod, serbox.mbt and npmjs/package.json
-git tag v0.1.5 && git push origin v0.1.6
+git tag v0.1.6 && git push origin v0.1.6
 ```
 
 The release workflow builds both static Linux binaries, publishes a GitHub
