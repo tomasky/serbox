@@ -1,6 +1,6 @@
 {
   "name": "@tomasko/serbox",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Linux boxes for agents, on your own server: create, exec, copy, snapshot and forward ports into isolated Docker boxes, with no account and no API key.",
   "license": "Apache-2.0",
   "bin": {
