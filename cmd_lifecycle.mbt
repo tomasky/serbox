@@ -543,6 +543,11 @@ pub async fn cmd_rm(args : Args) -> Unit {
       raise CliError::Failed(1, "not removed (pass --yes to confirm)")
     }
   }
+  // Stop forwarders first: a listener on a dead container only produces
+  // connection resets, and its record would outlive the box file.
+  unpublish_box_ports(config.name) catch {
+    _ => ()
+  }
   let removed = remove_container(config.name)
   if removed.code != 0 {
     raise CliError::Failed(
@@ -830,6 +835,9 @@ pub async fn cmd_gc(args : Args) -> Unit {
   for config in boxes {
     if config.delete_at > 0L && now >= config.delete_at {
       if !dry {
+        unpublish_box_ports(config.name) catch {
+          _ => ()
+        }
         let removed = remove_container(config.name)
         if removed.code == 0 {
           delete_box_config(config.name)

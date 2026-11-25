@@ -131,8 +131,14 @@ body="$(curl -fsS -m 3 http://127.0.0.1:18099/ || true)"
 "$bin" port unpublish "$name" 3000 >/dev/null || fail "port unpublish"
 ok "port forwarded and unpublished"
 
+# Removing a box must also stop its forwarders, or the host keeps a listener
+# that only answers with connection resets.
+"$bin" port publish "$name" 3000 --host 18099 >/dev/null || fail "re-publish"
+"$bin" rm "$name" --yes >/dev/null || fail "rm with a published port"
+"$bin" port ls | grep -q "$name" && fail "rm left a port record behind"
+ok "rm stopped the forwarder"
+
 say "cleanup"
-"$bin" rm "$name" --yes >/dev/null || fail "rm"
 expect_code 4 "$bin" exec "$name" -- true
 "$bin" rm "$name-renamed" --yes >/dev/null || fail "rm renamed"
 ok "removed"

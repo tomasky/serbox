@@ -183,6 +183,26 @@ pub async fn unpublish_port(box : String, container_port : Int32) -> Unit {
 }
 
 ///|
+/// Stop every forwarder a box owns. `rm` and `gc` use this so a removed box
+/// cannot leave a listener behind; a box with no published ports is a no-op.
+pub async fn unpublish_box_ports(box : String) -> Unit {
+  for forward in all_port_forwards() {
+    if forward.box == box {
+      if process_alive(forward.pid) {
+        ignore(
+          @process.run("kill", ["-TERM", "\{forward.pid}"]) catch {
+            _ => 0
+          },
+        )
+      }
+      @fs.remove(port_record_path(box, forward.container), allow_missing=true) catch {
+        _ => ()
+      }
+    }
+  }
+}
+
+///|
 /// `serbox port publish|ls|unpublish|setup`
 pub async fn cmd_port(args : Args) -> Unit {
   let sub = args.arg(0, "port subcommand (publish|ls|unpublish)")

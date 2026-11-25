@@ -357,6 +357,8 @@ pub fn trim_trailing_slash(String) -> String
 
 pub async fn unpause_container(String) -> DockerResult
 
+pub async fn unpublish_box_ports(String) -> Unit
+
 pub async fn unpublish_port(String, Int32) -> Unit
 
 pub fn usage_error(String) -> CliError
