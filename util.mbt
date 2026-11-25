@@ -83,6 +83,12 @@ pub async fn write_text(path : String, text : String) -> Unit {
 }
 
 ///|
+/// Write a file only the owner can read, for hosts and secrets.
+pub async fn write_secret(path : String, text : String) -> Unit {
+  @fs.write_file(path, text, create_mode=@fs.CreateOrTruncate, permission=0o600)
+}
+
+///|
 /// Directory entry names, sorted, without the `.`/`..` noise. `[]` for a
 /// directory that does not exist.
 pub async fn list_dir(path : String) -> Array[String] {
@@ -433,6 +439,10 @@ pub async fn read_lines(path : String) -> Array[String] {
 extern "C" fn serbox_isatty(fd : Int32) -> Int32 = "serbox_isatty"
 
 ///|
+/// FFI: this process's pid, for the daemon's pid file.
+pub extern "C" fn serbox_getpid() -> Int32 = "serbox_getpid"
+
+///|
 /// FFI: `exit(3)`, the only way a command reports its status.
 pub extern "C" fn serbox_exit(status : Int32) -> Unit = "serbox_exit"
 
@@ -484,4 +494,53 @@ pub fn ascii_lowercase(text : String) -> String {
     }
   }
   buf.to_string()
+}
+
+///|
+/// Lowercase hex, for the remote protocol: JSON carries text, and command
+/// output is arbitrary bytes, so every byte goes over as two hex digits.
+pub fn hex_encode(data : Bytes) -> String {
+  let alphabet = "0123456789abcdef"
+  let buf = StringBuilder()
+  for byte in data {
+    let value = byte.to_int() & 0xff
+    buf.write_char(alphabet.get_char(value / 16).unwrap_or('0'))
+    buf.write_char(alphabet.get_char(value % 16).unwrap_or('0'))
+  }
+  buf.to_string()
+}
+
+///|
+/// The inverse of `hex_encode`; `None` for odd length or a non-hex digit.
+pub fn hex_decode(text : String) -> Bytes? {
+  let n = text.length()
+  if n % 2 != 0 {
+    return None
+  }
+  let out : Array[Byte] = []
+  let view = text.clamped_view()
+  let mut i = 0
+  while i < n {
+    let hi = hex_digit(view.get_char(i).unwrap_or(' '))
+    let lo = hex_digit(view.get_char(i + 1).unwrap_or(' '))
+    match (hi, lo) {
+      (Some(hi), Some(lo)) => out.push((hi * 16 + lo).to_byte())
+      _ => return None
+    }
+    i = i + 2
+  }
+  Some(Bytes::from_array(out))
+}
+
+///|
+fn hex_digit(c : Char) -> Int32? {
+  if c >= '0' && c <= '9' {
+    Some(c.to_int() - 48)
+  } else if c >= 'a' && c <= 'f' {
+    Some(c.to_int() - 87)
+  } else if c >= 'A' && c <= 'F' {
+    Some(c.to_int() - 55)
+  } else {
+    None
+  }
 }

@@ -10,15 +10,20 @@
 
 #include <moonbit.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 MOONBIT_FFI_EXPORT
 void serbox_exit(int32_t status) {
   exit((int)status);
 }
 
-#include <unistd.h>
-
 MOONBIT_FFI_EXPORT
 int32_t serbox_isatty(int32_t fd) {
   return isatty((int)fd) ? 1 : 0;
+}
+
+// The daemon writes its pid so `serve --restart` can replace exactly that
+// process. MoonBit's async process API exposes child pids but not our own.
+int32_t serbox_getpid(void) {
+  return (int32_t)getpid();
 }

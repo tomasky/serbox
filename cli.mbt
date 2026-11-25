@@ -299,11 +299,19 @@ pub async fn cmd_version() -> Unit {
 pub async fn main_cli() -> Unit {
   let argv = @env.args()
   let raw : Array[String] = []
+  // `-H NAME` / `--remote NAME` routes the whole command to another server.
+  let remote : Ref[String] = Ref("")
+  let remote_args : Array[String] = []
   let mut i = 1
   while i < argv.length() {
     let arg = argv[i]
     i = i + 1
-    if arg == "--no-color" {
+    if arg == "-H" || arg == "--remote" {
+      if i < argv.length() {
+        remote.val = argv[i]
+        i = i + 1
+      }
+    } else if arg == "--no-color" {
       @env.set_env_var("NO_COLOR", "1")
     } else if arg == "--json" {
       json_mode.val = true
@@ -320,6 +328,7 @@ pub async fn main_cli() -> Unit {
       }
     } else {
       raw.push(arg)
+      remote_args.push(arg)
     }
   }
   if raw.length() == 0 {
@@ -330,6 +339,37 @@ pub async fn main_cli() -> Unit {
     return
   }
   let command = raw[0]
+  // `host use` sets a default, so plain `serbox exec …` follows the box you
+  // are working on. `-H local` and `host use local` both mean this machine.
+  let explicit = remote.val.trim().to_owned()
+  let selected = if explicit.length() > 0 { explicit } else { current_host() }
+  let target_host = if selected == "local" { "" } else { selected }
+  if target_host.length() > 0 &&
+    command != "serve" &&
+    command != "host" &&
+    command != "version" {
+    // `--json` is a client-side global, so it was stripped above; the remote
+    // command has to be told too or it prints a table into our JSON pipe.
+    let forwarded : Array[String] = []
+    if json_mode.val {
+      forwarded.push("--json")
+    }
+    for arg in remote_args {
+      forwarded.push(arg)
+    }
+    let code = remote_run(target_host, forwarded) catch {
+      CliError::Failed(code, message) => {
+        report_failure(code, message)
+        return
+      }
+      _ => {
+        report_failure(1, "the remote command failed")
+        return
+      }
+    }
+    serbox_exit(code)
+    return
+  }
   let rest : Array[String] = []
   for i in 1..<raw.length() {
     rest.push(raw[i])
@@ -394,6 +434,15 @@ async fn report_failure(code : Int32, message : String) -> Unit {
   }
   eline("serbox: error \{name}: \{message}")
   serbox_exit(code)
+}
+
+///|
+fn rest_tail(args : Array[String]) -> Array[String] {
+  let out : Array[String] = []
+  for i in 1..<args.length() {
+    out.push(args[i])
+  }
+  out
 }
 
 ///|
@@ -608,6 +657,38 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
       } else {
         run_forwarder(rest[0], parse_port(rest[1]), parse_port(rest[2]))
       }
+    "serve" =>
+      cmd_serve(
+        parse_args(
+          rest,
+          with_common(["port", "bind"], []).0,
+          with_common([], [
+            "ensure", "daemon", "print-token", "rotate-token", "restart",
+          ]).1,
+        ),
+      )
+    "host" | "hosts" =>
+      match rest.length() {
+        0 => cmd_host_ls(parse_args([], [], []))
+        _ =>
+          match rest[0] {
+            "add" =>
+              cmd_host_add(
+                parse_args(
+                  rest_tail(rest),
+                  with_common(["port", "address", "token"], []).0,
+                  with_common([], ["install", "force"]).1,
+                ),
+              )
+            "ls" | "list" => cmd_host_ls(parse_args(rest_tail(rest), [], []))
+            "rm" | "remove" => cmd_host_rm(parse_args(rest_tail(rest), [], []))
+            "use" | "switch" =>
+              cmd_host_use(parse_args(rest_tail(rest), [], []))
+            "current" => cmd_host_current(parse_args(rest_tail(rest), [], []))
+            other =>
+              raise usage_error("unknown host command '\{other}' (add|ls|rm)")
+          }
+      }
     "login"
     | "logout"
     | "whoami"
@@ -668,6 +749,8 @@ pub async fn print_usage() -> Unit {
     ["fork NAME", "copy a box"],
     ["port publish", "publish a port"],
     ["skills install", "install agent skills"],
+    ["host add/ls/use/rm", "control other servers"],
+    ["serve", "run the daemon a client talks to"],
     ["doctor", "check the host"],
   ]
   let text = render_table(["command", "what it does"], rows)
@@ -677,7 +760,7 @@ pub async fn print_usage() -> Unit {
   line("")
   line(text.trim_end().to_owned())
   line("")
-  line("Global flags: --json, --no-color")
+  line("Global flags: -H/--remote HOST, --json, --no-color")
   line(
     "Run `serbox help <command>` for flags. Host state lives in \{serbox_home()}",
   )
@@ -709,6 +792,14 @@ pub async fn print_command_help(command : String) -> Unit {
       "serbox port unpublish BOX PORT"
     "skills" =>
       "serbox skills install [-y] [--claude|--codex|--cursor|--opencode|--antigravity|--all]"
+    "host" =>
+      "serbox host add NAME USER@HOST [--port P] [--install] [--force]\n" +
+      "serbox host add NAME --address 127.0.0.1:P --token T\n" +
+      "serbox host ls | use NAME|local | current | rm NAME\n" +
+      "serbox hosts   (short for host ls)"
+    "serve" =>
+      "serbox serve [--port P] [--bind ADDR] [--ensure|--restart|--daemon]\n" +
+      "              [--print-token|--rotate-token] [--json]"
     "push" => "serbox push BOX LOCAL [REMOTE] [-p] [--all]"
     "pull" => "serbox pull BOX REMOTE [LOCAL]"
     "cp" => "serbox cp [-r] BOX:/path ./local   (or the other way round)"

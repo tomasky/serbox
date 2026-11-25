@@ -84,6 +84,61 @@ Boxes share the host kernel. Anyone who can run `docker` can read every box on
 the machine, so serbox is for a server you already trust, not for untrusted
 multi-tenant hosting.
 
+## One CLI, many servers
+
+A box lives on one Linux host, but you do not have to sit on that host. Run a
+small daemon there once, register it on your laptop, and every command works
+against it — including from a laptop that has no Docker at all.
+
+On the server (once):
+
+```bash
+serbox serve --ensure            # start on 127.0.0.1:7373, prints the token
+serbox serve --print-token       # show the token later
+```
+
+On your laptop:
+
+```bash
+# uses ssh: checks/installs serbox on the server, starts the daemon,
+# opens a local tunnel and stores a per-host token
+serbox host add prod me@prod.example.com
+
+serbox host use prod             # make it the default
+serbox create --name dev --template node
+serbox exec dev -- 'node --version'
+serbox ssh dev                   # ssh -t through the server
+serbox host use local            # back to this machine
+```
+
+`serbox -H prod ls` pins one command to a host without changing the default.
+`serbox host ls` lists hosts with their state and current marker; `serbox host
+rm prod` forgets one. Tunnels are started on demand and reused.
+
+Each host keeps its own token in `~/.serbox/hosts.json` (mode 0600), so servers
+never share credentials and switching is just `host use`. Rotate a server's
+token with `serbox serve --rotate-token` on that server; clients re-authorize
+with `serbox host add NAME ... --force`.
+
+Rules for a host added by ssh: it needs `ssh` and either the serbox binary in
+`PATH` or `--install` (which runs `install.sh`). An air-gapped or pre-tunnelled
+server can be registered directly:
+
+```bash
+serbox host add prod --address 127.0.0.1:7373 --token TOKEN
+```
+
+`exec`, `ls`, `create`, snapshots, jobs, ports and the rest are served by the
+daemon; exit codes and `--json` come back unchanged. `push` and `pull` also
+work over ssh because they touch your local disk — those two commands need the
+host to have been added by ssh, not `--address`.
+
+Security: the daemon speaks plain HTTP on loopback by default and authenticates
+every request with a 32-hex-character token. Reach it through ssh (`host add`),
+a private network, or a TLS terminator; never expose the port to the internet.
+Anyone with the token can run commands in your boxes.
+
+
 ## Commands
 
 | command | what it does |
@@ -103,8 +158,9 @@ multi-tenant hosting.
 | `ps`, `history`, `output`, `disk`, `metrics`, `logs` | look inside |
 | `templates`, `usage`, `doctor`, `completion`, `update` | host and shell help |
 | `skills install` | install the serbox agent skill |
+| `serve`, `host add/ls/use/current/rm` | run and use boxes on other servers |
 
-Global flags: `--json` (`-o json`), `--no-color`.
+Global flags: `-H/--remote HOST`, `--json` (`-o json`), `--no-color`.
 
 ### Piping and exit codes
 

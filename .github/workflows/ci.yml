@@ -35,6 +35,9 @@ jobs:
       - name: Build
         run: moon build --target native --release
 
+      - name: Remote layer (two daemons, one CLI)
+        run: ./scripts/test-remote.sh _build/native/release/build/cmd/main/main.exe
+
       - name: Exercise the CLI without docker
         run: |
           set -eu

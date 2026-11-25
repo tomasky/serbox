@@ -204,3 +204,22 @@ test "templates map to pinned images" {
   assert_eq(@serbox.template_image("alpine"), Some("alpine:3.20"))
   assert_eq(@serbox.template_image("nope"), None)
 }
+
+///|
+test "hex round trip and rejection" {
+  let bytes = Bytes::from_array([b'\x00', b'\x0f', b'\x7f', b'\xff'])
+  let text = @serbox.hex_encode(bytes)
+  assert_eq(text, "000f7fff")
+  let back = @serbox.hex_decode(text).unwrap()
+  assert_eq(back.length(), 4)
+  assert_eq(back[0], b'\x00')
+  assert_eq(back[3], b'\xff')
+  assert_true(@serbox.hex_decode("abc") is None)
+  assert_true(@serbox.hex_decode("zz") is None)
+}
+
+///|
+test "serve pid path is per port" {
+  assert_true(@serbox.serve_pid_path(7001) != @serbox.serve_pid_path(7002))
+  assert_true(@serbox.serve_pid_path(7001).has_suffix(".pid"))
+}

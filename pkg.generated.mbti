@@ -7,7 +7,11 @@ import {
 }
 
 // Values
+pub const DEFAULT_SERVE_PORT : Int32 = 7373
+
 pub async fn all_boxes() -> Array[BoxConfig]
+
+pub async fn all_hosts() -> Array[HostRecord]
 
 pub async fn all_jobs(String) -> Array[Job]
 
@@ -63,6 +67,16 @@ pub async fn cmd_get(Args) -> Unit
 
 pub async fn cmd_history(Args) -> Unit
 
+pub async fn cmd_host_add(Args) -> Unit
+
+pub async fn cmd_host_current(Args) -> Unit
+
+pub async fn cmd_host_ls(Args) -> Unit
+
+pub async fn cmd_host_rm(Args) -> Unit
+
+pub async fn cmd_host_use(Args) -> Unit
+
 pub async fn cmd_jobs(Args) -> Unit
 
 pub async fn cmd_lifecycle(String, Args) -> Unit
@@ -94,6 +108,8 @@ pub async fn cmd_rm(Args) -> Unit
 pub async fn cmd_run(Args) -> Unit
 
 pub async fn cmd_secrets(Args) -> Unit
+
+pub async fn cmd_serve(Args) -> Unit
 
 pub async fn cmd_skills(Args) -> Unit
 
@@ -143,9 +159,15 @@ pub async fn copy_out(String, String, String) -> DockerResult
 
 pub async fn create_box(CreateOptions) -> BoxConfig
 
+pub async fn current_host() -> String
+
+pub fn current_host_path() -> String
+
 pub let default_template : String
 
 pub async fn delete_box_config(String) -> Unit
+
+pub async fn delete_host(String) -> Bool
 
 pub async fn delete_snapshot_config(String) -> Unit
 
@@ -189,11 +211,17 @@ pub fn generate_box_name(String) -> String
 
 pub fn green(String) -> String
 
+pub fn hex_decode(String) -> Bytes?
+
+pub fn hex_encode(Bytes) -> String
+
 pub fn history_dir() -> String
 
 pub fn host_name() -> String
 
 pub async fn host_path_is_dir(String) -> Bool
+
+pub fn hosts_path() -> String
 
 pub async fn image_exists(String) -> Bool
 
@@ -217,11 +245,15 @@ pub async fn load_box(String) -> BoxConfig?
 
 pub async fn load_box_or_fail(String) -> BoxConfig
 
+pub async fn load_host(String) -> HostRecord?
+
 pub async fn load_port_forward(String, Int32) -> PortForward?
 
 pub async fn load_secrets() -> Map[String, String]
 
 pub async fn load_snapshot(String) -> Snapshot?
+
+pub async fn local_port_open(Int32) -> Bool
 
 pub async fn main_cli() -> Unit
 
@@ -283,6 +315,8 @@ pub async fn record_history(String, HistoryEntry) -> Unit
 
 pub fn red(String) -> String
 
+pub async fn remote_run(String, Array[String]) -> Int32
+
 pub async fn remove_container(String) -> DockerResult
 
 pub async fn remove_image(String) -> DockerResult
@@ -303,6 +337,8 @@ pub async fn run_setup_file(BoxConfig, String, Bool) -> Unit
 
 pub async fn save_box(BoxConfig) -> Unit
 
+pub async fn save_hosts(Array[HostRecord]) -> Unit
+
 pub async fn save_port_forward(PortForward) -> Unit
 
 pub async fn save_snapshot(Snapshot) -> Unit
@@ -315,11 +351,23 @@ pub async fn self_exe() -> String
 
 pub fn serbox_exit(Int32) -> Unit
 
+pub fn serbox_getpid() -> Int32
+
 pub fn serbox_home() -> String
 
 pub let serbox_skill : String
 
 pub let serbox_version : String
+
+pub fn serve_log_path() -> String
+
+pub async fn serve_loop(String, Int32) -> Unit
+
+pub fn serve_pid_path(Int32) -> String
+
+pub async fn serve_token(Bool) -> String
+
+pub fn serve_token_path() -> String
 
 pub fn set_json_mode(Bool) -> Unit
 
@@ -361,6 +409,8 @@ pub async fn unpublish_box_ports(String) -> Unit
 
 pub async fn unpublish_port(String, Int32) -> Unit
 
+pub async fn upsert_host(HostRecord) -> Unit
+
 pub fn usage_error(String) -> CliError
 
 pub fn user_home() -> String
@@ -372,6 +422,8 @@ pub fn valid_secret_name(String) -> Bool
 pub fn valid_snapshot_name(String) -> Bool
 
 pub fn with_box_defaults(@json.Json) -> @json.Json
+
+pub async fn write_secret(String, String) -> Unit
 
 pub async fn write_text(String, String) -> Unit
 
@@ -449,6 +501,18 @@ pub(all) struct HistoryEntry {
   mut duration_ms : Int64
   mut stdout_text : String
   mut stderr_text : String
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct HostRecord {
+  mut name : String
+  mut target : String
+  mut remote_bin : String
+  mut remote_port : Int32
+  mut local_port : Int32
+  mut token : String
+  mut tunnel_pid : Int32
+  mut created_at : Int64
 }
 
 #derive(@debug.Debug, @json.FromJson, @json.ToJson)

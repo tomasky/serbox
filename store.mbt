@@ -409,3 +409,98 @@ pub async fn all_port_forwards() -> Array[PortForward] {
   }
   forwards
 }
+
+///|
+/// A server this CLI can drive remotely: the SSH target used to reach it, the
+/// daemon port on that server, and the token that daemon requires.
+///
+/// The token is as sensitive as an SSH key: anyone holding it can run any
+/// serbox command on that server. `hosts.json` is therefore written `0600`.
+#derive(Debug, ToJson, FromJson)
+pub(all) struct HostRecord {
+  mut name : String
+  /// `user@host` for ssh, or "" when only a pre-made tunnel address is known.
+  mut target : String
+  /// The `serbox` path on the server, or "serbox" when it is on PATH.
+  mut remote_bin : String
+  mut remote_port : Int32
+  /// Local end of the ssh tunnel; this is what clients connect to.
+  mut local_port : Int32
+  /// Bearer token for the remote daemon.
+  mut token : String
+  /// ssh tunnel process, so `host rm` can stop it.
+  mut tunnel_pid : Int32
+  mut created_at : Int64
+}
+
+///|
+pub fn hosts_path() -> String {
+  path_join(serbox_home(), "hosts.json")
+}
+
+///|
+pub async fn all_hosts() -> Array[HostRecord] {
+  match read_text(hosts_path()) {
+    None => []
+    Some(text) => {
+      let json = @json.parse(text) catch { _ => return [] }
+      let hosts : Array[HostRecord] = @json.from_json(json) catch {
+        _ => return []
+      }
+      hosts
+    }
+  }
+}
+
+///|
+pub async fn save_hosts(hosts : Array[HostRecord]) -> Unit {
+  ensure_dir(serbox_home())
+  write_secret(hosts_path(), @json.to_json(hosts).stringify())
+}
+
+///|
+pub async fn load_host(name : String) -> HostRecord? {
+  for host in all_hosts() {
+    if host.name == name {
+      return Some(host)
+    }
+  }
+  None
+}
+
+///|
+/// Replace one host record, or append it when the name is new.
+pub async fn upsert_host(record : HostRecord) -> Unit {
+  let hosts = all_hosts()
+  let out : Array[HostRecord] = []
+  let mut replaced = false
+  for host in hosts {
+    if host.name == record.name {
+      out.push(record)
+      replaced = true
+    } else {
+      out.push(host)
+    }
+  }
+  if !replaced {
+    out.push(record)
+  }
+  save_hosts(out)
+}
+
+///|
+pub async fn delete_host(name : String) -> Bool {
+  let out : Array[HostRecord] = []
+  let mut found = false
+  for host in all_hosts() {
+    if host.name == name {
+      found = true
+    } else {
+      out.push(host)
+    }
+  }
+  if found {
+    save_hosts(out)
+  }
+  found
+}

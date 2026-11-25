@@ -123,7 +123,8 @@ pub async fn cmd_completion(args : Args) -> Unit {
     "restart", "wake", "auto-suspend", "max-run", "resize", "templates", "usage",
     "gc", "run", "exec", "jobs", "ps", "history", "output", "ssh", "files", "push",
     "pull", "cp", "disk", "metrics", "logs", "snapshot", "fork", "port", "secrets",
-    "skills", "doctor", "completion", "update", "version", "help",
+    "skills", "host", "hosts", "serve", "doctor", "completion", "update", "version",
+    "help",
   ]
   let words = commands.join(" ")
   match shell {
