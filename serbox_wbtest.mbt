@@ -60,3 +60,29 @@ test "a paused box is not usable without waking" {
   assert_eq(display_state("paused", "auto"), "auto-paused")
   assert_eq(display_state("paused", ""), "paused")
 }
+
+///|
+test "remote routing skips client-side global flags" {
+  let argv : Array[String] = ["--json", "--no-color", "push", "dev", "./x"]
+  assert_eq(command_index(argv), 2)
+  let plain : Array[String] = ["ls"]
+  assert_eq(command_index(plain), 0)
+}
+
+///|
+test "secret values containing a line break are rejected" {
+  assert_true(secret_value_has_newline("a\nb"))
+  assert_true(secret_value_has_newline("a\rb"))
+  assert_false(secret_value_has_newline("a b"))
+  assert_false(secret_value_has_newline(""))
+}
+
+///|
+test "short image names are distinguished from registry references" {
+  assert_false(image_has_registry("alpine"))
+  assert_false(image_has_registry("alpine:3.20"))
+  assert_false(image_has_registry("library/alpine"))
+  assert_true(image_has_registry("docker.io/library/alpine"))
+  assert_true(image_has_registry("ghcr.io/owner/image:tag"))
+  assert_true(image_has_registry("localhost:5000/image"))
+}

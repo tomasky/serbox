@@ -208,7 +208,7 @@ pub async fn unpublish_port(box : String, container_port : Int32) -> Unit {
     Some(forward) => forward
     None => raise CliError::Failed(4, "port \{container_port} is not published")
   }
-  await_forwarder_stop(forward.pid)
+  await_forwarder_stop(forward.pid, box, container_port)
   @fs.remove(port_record_path(box, container_port), allow_missing=true) catch {
     _ => ()
   }
@@ -220,7 +220,7 @@ pub async fn unpublish_port(box : String, container_port : Int32) -> Unit {
 pub async fn unpublish_box_ports(box : String) -> Unit {
   for forward in all_port_forwards() {
     if forward.box == box {
-      await_forwarder_stop(forward.pid)
+      await_forwarder_stop(forward.pid, box, forward.container)
       @fs.remove(port_record_path(box, forward.container), allow_missing=true) catch {
         _ => ()
       }
@@ -229,9 +229,48 @@ pub async fn unpublish_box_ports(box : String) -> Unit {
 }
 
 ///|
-/// Stop a forwarder: SIGTERM, then SIGKILL if it is still there after a second.
-async fn await_forwarder_stop(pid : Int32) -> Unit {
+/// Whether `pid` is this box's forwarder (and not a recycled pid).
+async fn is_forwarder_pid(
+  pid : Int32,
+  box : String,
+  container_port : Int32,
+) -> Bool {
   if !process_alive(pid) {
+    return false
+  }
+  let cmdline = match read_text("/proc/\{pid}/cmdline") {
+    Some(text) => text
+    None => return false
+  }
+  let args : Array[String] = []
+  for part in cmdline.split("\u{0}") {
+    args.push(part.to_owned())
+  }
+  let want = "\{container_port}"
+  for i in 0..<args.length() {
+    if args[i] == "__forward" &&
+      i + 3 < args.length() &&
+      args[i + 1] == box &&
+      args[i + 3] == want {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Stop a forwarder: SIGTERM, then SIGKILL if it is still there after a second.
+async fn await_forwarder_stop(
+  pid : Int32,
+  box : String,
+  container_port : Int32,
+) -> Unit {
+  if !process_alive(pid) {
+    return
+  }
+  // A stale record can point at a recycled pid. Only signal a process whose
+  // command line is actually this box's forwarder.
+  if !(is_forwarder_pid(pid, box, container_port) catch { _ => false }) {
     return
   }
   let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
@@ -289,7 +328,14 @@ pub async fn cmd_port(args : Args) -> Unit {
         if only is Some(name) && name != forward.box {
           continue
         }
-        let alive = if process_alive(forward.pid) { "live" } else { "dead" }
+        let running = is_forwarder_pid(
+          forward.pid,
+          forward.box,
+          forward.container,
+        ) catch {
+          _ => false
+        }
+        let alive = if running { "live" } else { "dead" }
         rows.push([
           forward.box,
           "\{forward.host}",

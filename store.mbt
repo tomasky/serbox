@@ -185,6 +185,21 @@ pub async fn delete_box_config(name : String) -> Unit {
 }
 
 ///|
+/// Remove the per-box state that is not the record: history and job files.
+/// The container and the record are removed by the caller, which has to decide
+/// whether a failed container removal should keep the name.
+pub async fn clear_box_state(name : String) -> Unit {
+  @fs.remove(path_join(history_dir(), "\{name}.jsonl"), allow_missing=true) catch {
+    _ => ()
+  }
+  let jobs = path_join(jobs_dir(), name)
+  let exists = @fs.exists(jobs) catch { _ => false }
+  if exists {
+    let _ = @process.run("rm", ["-rf", "--", jobs]) catch { _ => 0 }
+  }
+}
+
+///|
 /// Every box record on this host, oldest first.
 pub async fn all_boxes() -> Array[BoxConfig] {
   let names = list_dir(boxes_dir())

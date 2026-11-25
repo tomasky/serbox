@@ -285,7 +285,7 @@ async fn pump_client_to_child(
 /// Check that the daemon on `port` accepts this token, before trusting an
 /// existing listener. Two `SERBOX_HOME`s on one port would otherwise silently
 /// talk past each other.
-async fn serve_auth_ok(port : Int32, token : String) -> Bool {
+async fn serve_auth_probe(port : Int32, token : String) -> Bool {
   let addr = @socket.Addr::parse("127.0.0.1:\{port}")
   let conn = @socket.Tcp::connect(addr)
   let auth = @json.Json::object(Map([("token", @json.Json::string(token))]))
@@ -310,6 +310,19 @@ async fn serve_auth_ok(port : Int32, token : String) -> Bool {
   }
   conn.close()
   ok
+}
+
+///|
+/// A listener that accepts but never answers must not hang `host add` or
+/// `serve --restart` forever.
+async fn serve_auth_ok(port : Int32, token : String) -> Bool {
+  let result = @async.with_timeout_opt(3000, () => serve_auth_probe(port, token)) catch {
+    _ => None
+  }
+  match result {
+    Some(ok) => ok
+    None => false
+  }
 }
 
 ///|
@@ -376,10 +389,23 @@ pub async fn cmd_serve(args : Args) -> Unit {
     if pid <= 0 && local_port_open(port) {
       pid = find_daemon_pid(port)
     }
+    if pid <= 0 && local_port_open(port) {
+      let ours = serve_auth_ok(port, token) catch { _ => false }
+      if !ours {
+        raise CliError::Failed(
+          1,
+          "port \{bind}:\{port} is used by another process, not a serbox daemon with this token",
+        )
+      }
+      raise CliError::Failed(
+        1,
+        "a serbox daemon is already running on \{bind}:\{port}, but its pid could not be found; stop it and run the restart again",
+      )
+    }
     if pid_alive(pid) {
       // A stale pid file can point at a recycled pid; never kill an unrelated
       // process just because it wears the daemon's old number.
-      if is_serve_pid(pid) {
+      if is_serve_pid(pid, port) {
         let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
       } else {
         pid = 0
@@ -396,6 +422,12 @@ pub async fn cmd_serve(args : Args) -> Unit {
       raise CliError::Failed(
         1,
         "the serbox daemon did not restart on \{bind}:\{port}; see \{serve_log_path()}",
+      )
+    }
+    if !(serve_auth_ok(port, token) catch { _ => false }) {
+      raise CliError::Failed(
+        1,
+        "the listener on \{bind}:\{port} does not accept the serbox token; see \{serve_log_path()}",
       )
     }
     if json_only(serve_info(port, token)) {
@@ -420,6 +452,12 @@ pub async fn cmd_serve(args : Args) -> Unit {
         raise CliError::Failed(
           1,
           "the serbox daemon did not start on \{bind}:\{port}; see \{serve_log_path()}",
+        )
+      }
+      if !(serve_auth_ok(port, token) catch { _ => false }) {
+        raise CliError::Failed(
+          1,
+          "the listener on \{bind}:\{port} does not accept the serbox token; see \{serve_log_path()}",
         )
       }
     }
@@ -498,7 +536,7 @@ async fn find_daemon_pid(port : Int32) -> Int32 {
 
 ///|
 /// Whether `pid` is the serbox daemon for `port` (and not a recycled pid).
-async fn is_serve_pid(pid : Int32) -> Bool {
+async fn is_serve_pid(pid : Int32, port : Int32) -> Bool {
   if !pid_alive(pid) {
     return false
   }
@@ -506,7 +544,22 @@ async fn is_serve_pid(pid : Int32) -> Bool {
     Some(text) => text
     None => return false
   }
-  cmdline.contains("--daemon") && cmdline.contains("--port")
+  let args : Array[String] = []
+  for part in cmdline.split("\u{0}") {
+    args.push(part.to_owned())
+  }
+  let want = "\{port}"
+  let mut daemon = false
+  let mut port_arg = false
+  for i in 0..<args.length() {
+    if args[i] == "--daemon" || args[i] == "serve" {
+      daemon = true
+    }
+    if args[i] == "--port" && i + 1 < args.length() && args[i + 1] == want {
+      port_arg = true
+    }
+  }
+  daemon && port_arg
 }
 
 ///|
@@ -716,7 +769,10 @@ pub async fn remote_run(host_name : String, argv : Array[String]) -> Int32 {
   // A shell must have a terminal. The daemon has none, so interactive shells
   // go through ssh -t and the binary already installed on the server; that is
   // the same path instabox takes for `ssh`.
-  if stdout_is_tty() && argv.length() > 0 && is_interactive_command(argv[0]) {
+  let command = command_index(argv)
+  if stdout_is_tty() &&
+    command < argv.length() &&
+    is_interactive_command(argv[command]) {
     return ssh_interactive(host, argv)
   }
   match remote_files(host, argv) {
@@ -732,15 +788,43 @@ pub async fn remote_run(host_name : String, argv : Array[String]) -> Int32 {
 /// file is scp'd to a temp path on the server, the remote command runs there,
 /// and the temp path is removed.
 async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
-  let command = if argv.length() > 0 { argv[0] } else { "" }
-  if command == "cp" && argv.length() >= 3 {
+  let index = command_index(argv)
+  let command = if index < argv.length() { argv[index] } else { "" }
+  // Keep client-side globals such as `--json` in the forwarded command: the
+  // daemon strips the value flags, but the remote binary must still know to
+  // print JSON.
+  let prefix : Array[String] = []
+  for i in 0..<index {
+    prefix.push(argv[i])
+  }
+  if command == "cp" && argv.length() >= index + 3 {
     // A remote `cp` touches a path on *this* machine, which the daemon cannot
     // see. Translate it into the push/pull path that already goes over ssh.
-    match (remote_ref(argv[1]), remote_ref(argv[2])) {
-      (Some((box, path)), None) =>
-        return remote_files(host, ["pull", box, path, argv[2]])
-      (None, Some((box, path))) =>
-        return remote_files(host, ["push", box, argv[1], path])
+    let src = argv[index + 1]
+    let dst = argv[index + 2]
+    match (remote_ref(src), remote_ref(dst)) {
+      (Some((box, path)), None) => {
+        let mapped : Array[String] = []
+        for arg in prefix {
+          mapped.push(arg)
+        }
+        mapped.push("pull")
+        mapped.push(box)
+        mapped.push(path)
+        mapped.push(dst)
+        return remote_files(host, mapped)
+      }
+      (None, Some((box, path))) => {
+        let mapped : Array[String] = []
+        for arg in prefix {
+          mapped.push(arg)
+        }
+        mapped.push("push")
+        mapped.push(box)
+        mapped.push(src)
+        mapped.push(path)
+        return remote_files(host, mapped)
+      }
       (Some(_), Some(_)) =>
         raise CliError::Failed(2, "cp copies between the host and one box")
       (None, None) =>
@@ -761,10 +845,10 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
     None => raise CliError::Failed(1, "cannot read random bytes")
   }
   if command == "push" {
-    if argv.length() < 3 {
+    if argv.length() < index + 3 {
       return None
     }
-    let source = argv[2]
+    let source = argv[index + 2]
     if !(@fs.exists(source) catch { _ => false }) {
       return None
     }
@@ -773,16 +857,20 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
     let temp = "/tmp/serbox-push-\{stamp}-\{safe_basename(source)}"
     let uploaded = scp_to(host.target, source, temp)
     if uploaded.code != 0 {
+      cleanup_remote(host.target, temp)
       raise CliError::Failed(
         1,
         "scp to \{host.target} failed: \{uploaded.err.trim()}",
       )
     }
     let forwarded : Array[String] = []
+    for arg in prefix {
+      forwarded.push(arg)
+    }
     forwarded.push("push")
-    forwarded.push(argv[1])
+    forwarded.push(argv[index + 1])
     forwarded.push(temp)
-    for i in 3..<argv.length() {
+    for i in (index + 3)..<argv.length() {
       forwarded.push(argv[i])
     }
     let code = remote_exec(host, forwarded) catch {
@@ -798,18 +886,34 @@ async fn remote_files(host : HostRecord, argv : Array[String]) -> Int32? {
     cleanup_remote(host.target, temp)
     Some(code)
   } else {
-    if argv.length() < 3 {
+    if argv.length() < index + 3 {
       return None
     }
-    let remote_path = argv[2]
-    let destination = if argv.length() >= 4 {
-      argv[3]
+    let remote_path = argv[index + 2]
+    let destination = if argv.length() >= index + 4 {
+      argv[index + 3]
     } else {
       path_basename(remote_path)
     }
     let temp = "/tmp/serbox-pull-\{stamp}"
-    let forwarded = ["pull", argv[1], remote_path, temp]
-    let code = remote_exec(host, forwarded)
+    let forwarded : Array[String] = []
+    for arg in prefix {
+      forwarded.push(arg)
+    }
+    forwarded.push("pull")
+    forwarded.push(argv[index + 1])
+    forwarded.push(remote_path)
+    forwarded.push(temp)
+    let code = remote_exec(host, forwarded) catch {
+      CliError::Failed(code, message) => {
+        cleanup_remote(host.target, temp)
+        raise CliError::Failed(code, message)
+      }
+      _ => {
+        cleanup_remote(host.target, temp)
+        raise CliError::Failed(1, "the remote pull failed")
+      }
+    }
     if code == 0 {
       let downloaded = scp_from(host.target, temp, destination)
       if downloaded.code != 0 {
@@ -970,6 +1074,22 @@ async fn remote_exec(host : HostRecord, argv : Array[String]) -> Int32 {
     raise CliError::Failed(1, code.message)
   }
   code.code
+}
+
+///|
+/// The first non-global token: client-side `--json`/`--no-color` may precede
+/// the subcommand after remote routing.
+fn command_index(argv : Array[String]) -> Int32 {
+  let mut i = 0
+  while i < argv.length() {
+    let arg = argv[i]
+    if arg == "--json" || arg == "--no-color" {
+      i = i + 1
+      continue
+    }
+    return i
+  }
+  i
 }
 
 ///|

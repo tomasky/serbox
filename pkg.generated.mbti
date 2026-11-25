@@ -47,6 +47,8 @@ pub fn bundled_skill_files() -> Array[SkillFile]
 
 pub fn bundled_skill_names() -> Array[String]
 
+pub async fn clear_box_state(String) -> Unit
+
 pub async fn cmd_auto_suspend(Args) -> Unit
 
 pub async fn cmd_completion(Args) -> Unit
@@ -333,6 +335,8 @@ pub async fn require_box(String) -> BoxConfig?
 
 pub async fn require_usable(BoxConfig, Bool) -> Unit
 
+pub async fn resolve_image(String) -> String
+
 pub async fn restart_container(String) -> DockerResult
 
 pub async fn run_container(String, String, Array[String]) -> DockerResult
@@ -350,6 +354,8 @@ pub async fn save_hosts(Array[HostRecord]) -> Unit
 pub async fn save_port_forward(PortForward) -> Unit
 
 pub async fn save_snapshot(Snapshot) -> Unit
+
+pub fn secret_value_has_newline(String) -> Bool
 
 pub async fn secrets_names() -> Array[String]
 

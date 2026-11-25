@@ -510,18 +510,14 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
               "name", "template", "snapshot", "image", "env", "env-file", "publish",
               "meta", "auto-suspend", "delete-after", "setup-file", "secrets",
             ],
-            ["no-wait", "fail-fast"],
+            ["no-wait"],
           ).0,
-          with_common([], ["no-wait", "fail-fast"]).1,
+          with_common([], ["no-wait"]).1,
         ),
       )
     "ls" | "list" =>
       cmd_ls(
-        parse_args(
-          rest,
-          with_common(["meta"], []).0,
-          with_common([], ["all"]).1,
-        ),
+        parse_args(rest, with_common(["meta"], []).0, with_common([], []).1),
       )
     "get" | "show" =>
       cmd_get(parse_args(rest, with_common([], []).0, with_common([], []).1))
@@ -567,11 +563,7 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
     "usage" => cmd_usage()
     "gc" =>
       cmd_gc(
-        parse_args(
-          rest,
-          with_common(["keep"], []).0,
-          with_common([], ["dry-run"]).1,
-        ),
+        parse_args(rest, with_common([], []).0, with_common([], ["dry-run"]).1),
       )
     "run" =>
       cmd_run(
@@ -621,11 +613,7 @@ async fn dispatch(command : String, rest : Array[String]) -> Unit {
       )
     "push" =>
       cmd_push(
-        parse_args(
-          rest,
-          with_common([], []).0,
-          with_common([], ["parents", "all"]).1,
-        ),
+        parse_args(rest, with_common([], []).0, with_common([], ["parents"]).1),
       )
     "pull" =>
       cmd_pull(parse_args(rest, with_common([], []).0, with_common([], []).1))
@@ -824,8 +812,8 @@ pub async fn print_command_help(command : String) -> Unit {
     "create" =>
       "serbox create --name N [--template T | --snapshot S | --image I]\n" +
       "              [--env K=V ...] [--env-file PATH] [--publish PORT[:HOST]]\n" +
-      "              [--meta K=V ...] [--auto-suspend D] [--delete-after D]\n" +
-      "              [--setup-file PATH] [--json]"
+      "              [--meta K=V ...] [--secrets NAMES|all] [--auto-suspend D]\n" +
+      "              [--delete-after D] [--setup-file PATH] [--json]"
     "ls" => "serbox ls [--meta K=V ...] [--json]"
     "exec" =>
       "serbox exec BOX [--cwd DIR] [--env K=V ...] [--timeout SECS]\n" +
@@ -854,7 +842,7 @@ pub async fn print_command_help(command : String) -> Unit {
     "serve" =>
       "serbox serve [--port P] [--bind ADDR] [--ensure|--restart|--daemon]\n" +
       "              [--print-token|--rotate-token] [--json]"
-    "push" => "serbox push BOX LOCAL [REMOTE] [-p] [--all]"
+    "push" => "serbox push BOX LOCAL [REMOTE] [-p]"
     "pull" => "serbox pull BOX REMOTE [LOCAL]"
     "cp" => "serbox cp [-r] BOX:/path ./local   (or the other way round)"
     "jobs" => "serbox jobs ls|logs|wait|kill BOX [JOB]"

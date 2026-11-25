@@ -1,7 +1,7 @@
 {
   "name": "@tomasko/serbox",
-  "version": "0.1.3",
-  "description": "Linux boxes for agents, on your own server: create, exec, copy, snapshot and forward ports into isolated Docker boxes, with no account and no API key.",
+  "version": "0.1.5",
+  "description": "Linux boxes for agents, on your own server: create, exec, copy, snapshot and forward ports into isolated Docker or Podman boxes, with no account and no API key.",
   "license": "Apache-2.0",
   "bin": {
     "serbox": "bin/serbox.js"
@@ -38,6 +38,7 @@
     "sandbox",
     "boxes",
     "docker",
+    "podman",
     "agents",
     "disposable",
     "devcontainer",

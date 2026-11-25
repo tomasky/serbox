@@ -182,7 +182,9 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
       "a container named '\{container_name(options.name)}' already exists; remove it with `serbox rm \{options.name}`",
     )
   }
-  let image = options.image
+  // Qualify a short image before it reaches Podman, and keep the qualified
+  // name in the record so restores and forks do not ask again.
+  let image = resolve_image(options.image)
   if !image_exists(image) {
     if !pull_image(image) {
       raise CliError::Failed(75, "could not pull image '\{image}'")
@@ -266,6 +268,20 @@ pub async fn create_box(options : CreateOptions) -> BoxConfig {
 ///|
 /// `serbox create`
 pub async fn cmd_create(args : Args) -> Unit {
+  let sources = [
+    args.value("template") is Some(_),
+    args.value("image") is Some(_),
+    args.value("snapshot") is Some(_),
+  ]
+  let mut source_count = 0
+  for present in sources {
+    if present {
+      source_count = source_count + 1
+    }
+  }
+  if source_count > 1 {
+    raise usage_error("give only one of --template, --image or --snapshot")
+  }
   let name = match args.value("name") {
     Some(name) => name
     None => generate_box_name("box-")
@@ -344,8 +360,17 @@ pub async fn cmd_create(args : Args) -> Unit {
     Some("none") | None => []
     Some(list) => {
       let names : Array[String] = []
-      for name in list.split(",") {
-        names.push(name.to_owned())
+      for part in list.split(",") {
+        let name = part.trim().to_owned()
+        if !valid_secret_name(name) {
+          raise usage_error("bad secret name '\{name}' (A-Z, digits, _)")
+        }
+        if !names.contains(name) {
+          names.push(name)
+        }
+      }
+      if names.length() == 0 {
+        raise usage_error("--secrets needs at least one name, or 'all'")
       }
       names
     }
@@ -578,11 +603,16 @@ async fn migrate_box_records(old_name : String, new_name : String) -> Unit {
     if forward.box == old_name {
       let old_path = port_record_path(old_name, forward.container)
       forward.box = new_name
+      let mut saved = true
       save_port_forward(forward) catch {
-        _ => ()
+        _ => saved = false
       }
-      @fs.remove(old_path, allow_missing=true) catch {
-        _ => ()
+      // If the new record could not be written, keep the old one so the
+      // forwarder is still reachable through `port unpublish OLD PORT`.
+      if saved {
+        @fs.remove(old_path, allow_missing=true) catch {
+          _ => ()
+        }
       }
     }
   }
@@ -651,6 +681,7 @@ pub async fn cmd_rm(args : Args) -> Unit {
   // A box whose container vanished (host reboot, manual docker rm) still has
   // a record; `rm` has to clean that up too, or the name is stuck forever.
   delete_box_config(config.name)
+  clear_box_state(config.name)
   if json_only(
       @json.Json::object(Map([("removed", @json.Json::string(config.name))])),
     ) {
@@ -860,6 +891,19 @@ pub async fn cmd_resize(args : Args) -> Unit {
       "could not resize: \{result.err.trim().to_owned()}",
     )
   }
+  if args.flag("restart") && container_state(config.name) == "running" {
+    let restarted = restart_container(config.name)
+    if restarted.code != 0 {
+      raise CliError::Failed(
+        1,
+        "the limits changed but the box did not restart: \{restarted.err.trim()}",
+      )
+    }
+    config.running_since = now_secs()
+    save_box(config) catch {
+      _ => ()
+    }
+  }
   if json_only(@json.to_json(config)) {
     return
   }
@@ -936,8 +980,9 @@ pub async fn cmd_gc(args : Args) -> Unit {
           _ => ()
         }
         let removed = remove_container(config.name)
-        if removed.code == 0 {
+        if removed.code == 0 || container_state(config.name) == "missing" {
           delete_box_config(config.name)
+          clear_box_state(config.name)
         }
       }
       actions.push(

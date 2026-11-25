@@ -96,6 +96,32 @@ test("SERBOX_BINARY short-circuits every download path", async () => {
   }
 });
 
+test("an invalid SERBOX_VERSION cannot escape the cache directory", () => {
+  const saved = process.env.SERBOX_VERSION;
+  process.env.SERBOX_VERSION = "../../tmp/x";
+  try {
+    assert.throws(() => lib.version(), /invalid serbox version/);
+  } finally {
+    if (saved === undefined) delete process.env.SERBOX_VERSION;
+    else process.env.SERBOX_VERSION = saved;
+  }
+});
+
+test("SERBOX_BINARY must be executable, not just present", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "serbox-test-"));
+  const file = path.join(dir, "serbox");
+  fs.writeFileSync(file, "#!/bin/sh\n", { mode: 0o644 });
+  const saved = process.env.SERBOX_BINARY;
+  process.env.SERBOX_BINARY = file;
+  try {
+    await assert.rejects(lib.ensureBinary(), /not executable/);
+  } finally {
+    if (saved === undefined) delete process.env.SERBOX_BINARY;
+    else process.env.SERBOX_BINARY = saved;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SERBOX_BINARY pointing nowhere is a clear error", async () => {
   const saved = process.env.SERBOX_BINARY;
   process.env.SERBOX_BINARY = "/nonexistent/serbox";

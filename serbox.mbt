@@ -11,7 +11,7 @@
 ///
 /// Single source for `serbox version`, the `--help` banner and the npm
 /// launcher. Keep it in step with `moon.mod` and `npmjs/package.json`.
-pub let serbox_version : String = "0.1.0"
+pub let serbox_version : String = "0.1.5"
 
 ///|
 /// Prefix of every Docker container serbox owns. A container outside this

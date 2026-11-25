@@ -170,7 +170,7 @@ async fn snapshot_rm(args : Args) -> Unit {
 
 ///|
 async fn snapshot_import(args : Args) -> Unit {
-  let image = args.arg(1, "image")
+  let image = resolve_image(args.arg(1, "image"))
   let name = args.need("name")
   if !valid_snapshot_name(name) {
     raise usage_error("bad snapshot name '\{name}'")
@@ -272,7 +272,8 @@ async fn snapshot_restore(args : Args) -> Unit {
     args_run.push("-p")
     args_run.push("\{port.host}:\{port.container}")
   }
-  let started = run_container(config.name, snapshot.image, args_run)
+  let image = resolve_image(snapshot.image)
+  let started = run_container(config.name, image, args_run)
   match env_file {
     Some(path) => @fs.remove(path, allow_missing=true) catch { _ => () }
     None => ()
@@ -285,6 +286,9 @@ async fn snapshot_restore(args : Args) -> Unit {
   }
   config.paused_by = ""
   config.running_since = now_secs()
+  // The container now runs the snapshot image, not the template image it was
+  // created from; `inspect` and later saves should report the truth.
+  config.image = image
   touch_box(config) catch {
     _ => ()
   }

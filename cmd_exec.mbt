@@ -385,6 +385,15 @@ pub async fn cmd_jobs(args : Args) -> Unit {
     "wait" => {
       let job_id = args.arg(2, "job id")
       require_job_id(job_id)
+      let mut known = false
+      for job in all_jobs(config.name) {
+        if job.id == job_id {
+          known = true
+        }
+      }
+      if !known {
+        raise CliError::Failed(4, "no such job '\{job_id}'")
+      }
       let timeout = match args.value("timeout") {
         Some(text) =>
           match parse_duration(text) {
@@ -546,11 +555,13 @@ pub async fn start_job(
   } else {
     exec_argv(command, timeout_secs, shell=config.shell) |> shell_join
   }
+  // `exec_argv` already wrapped the exact-argv form in `timeout`; wrapping it
+  // again would run the command under two nested timeouts. Only the shell
+  // string still needs the wrapper here.
   let body = match timeout_secs {
     Some(secs) if command.length() == 1 =>
       "timeout -k 5 \{secs}s \{config.shell} -lc \{shell_quote(body)}"
-    Some(secs) => "timeout -k 5 \{secs}s \{body}"
-    None => body
+    Some(_) | None => body
   }
   let script = "mkdir -p /data/.serbox/jobs\n" +
     "cd \{shell_quote(run_dir)} || exit 1\n" +
@@ -677,10 +688,15 @@ pub async fn cmd_ps(args : Args) -> Unit {
 pub async fn cmd_history(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
   let limit = match args.value("limit") {
-    Some(text) =>
-      @string.parse_int(text) catch {
+    Some(text) => {
+      let parsed = @string.parse_int(text) catch {
         _ => raise usage_error("bad --limit '\{text}'")
       }
+      if parsed < 1 || parsed > 200 {
+        raise usage_error("--limit is 1 to 200")
+      }
+      parsed
+    }
     None => 20
   }
   let entries = read_history(config.name, limit)

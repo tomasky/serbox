@@ -38,6 +38,10 @@ const TARGETS = {
 
 const SUPPORTED = "linux-x86_64 and linux-aarch64";
 
+// No serbox binary is anywhere near this large; the cap stops a wrong or
+// hostile mirror from filling the disk.
+const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+
 function targetName() {
   return TARGETS[`${process.platform}-${process.arch}`];
 }
@@ -52,8 +56,17 @@ function repoSlug() {
   return m ? `${m[1]}/${m[2]}` : "tomasky/serbox";
 }
 
+// The version is part of a cache path, so reject anything that could climb out
+// of the cache directory or create a second path segment.
 function version() {
-  return (process.env.SERBOX_VERSION || pkg.version).replace(/^v/, "");
+  const raw = String(process.env.SERBOX_VERSION || pkg.version || "").replace(/^v/, "");
+  if (!/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(raw)) {
+    throw new Error(
+      `invalid serbox version ${JSON.stringify(raw)}; ` +
+        "SERBOX_VERSION may contain only letters, digits, '.', '_' and '-'"
+    );
+  }
+  return raw;
 }
 
 function assetName(target) {
@@ -150,8 +163,15 @@ async function downloadTo(url, dest) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const tmp = `${dest}.${process.pid}.${Date.now()}.part`;
   try {
+    let received = 0;
     await new Promise((resolve, reject) => {
       const out = fs.createWriteStream(tmp, { mode: 0o755 });
+      res.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > MAX_DOWNLOAD_BYTES) {
+          res.destroy(new Error(`download is larger than ${MAX_DOWNLOAD_BYTES} bytes`));
+        }
+      });
       res.pipe(out);
       out.on("finish", () => out.close(resolve));
       out.on("error", reject);
@@ -198,12 +218,14 @@ async function verify(dest, url, log) {
  */
 async function ensureBinary({ force = false, log = () => {} } = {}) {
   if (process.env.SERBOX_BINARY) {
-    if (!fs.existsSync(process.env.SERBOX_BINARY)) {
-      throw new Error(
-        `SERBOX_BINARY points at ${process.env.SERBOX_BINARY}, which does not exist`
-      );
+    const binary = process.env.SERBOX_BINARY;
+    if (!fs.existsSync(binary)) {
+      throw new Error(`SERBOX_BINARY points at ${binary}, which does not exist`);
     }
-    return process.env.SERBOX_BINARY;
+    if (!isRunnable(binary)) {
+      throw new Error(`SERBOX_BINARY points at ${binary}, which is not executable`);
+    }
+    return binary;
   }
 
   const target = targetName();

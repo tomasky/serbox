@@ -53,6 +53,9 @@ pub async fn cmd_secrets(args : Args) -> Unit {
         CliError::Failed(_, message) => raise CliError::Failed(1, message)
         _ => raise CliError::Failed(1, "could not read the secret")
       }
+      if secret_value_has_newline(value) {
+        raise usage_error("a secret value cannot contain a newline")
+      }
       let secrets = load_secrets()
       secrets.set(name, value)
       save_secrets(secrets)
@@ -108,8 +111,17 @@ pub async fn cmd_secrets(args : Args) -> Unit {
         []
       } else {
         let names : Array[String] = []
-        for name in spec.split(",") {
-          names.push(name.to_owned())
+        for part in spec.split(",") {
+          let name = part.trim().to_owned()
+          if !valid_secret_name(name) {
+            raise usage_error("bad secret name '\{name}' (A-Z, digits, _)")
+          }
+          if !names.contains(name) {
+            names.push(name)
+          }
+        }
+        if names.length() == 0 {
+          raise usage_error("select needs at least one secret name")
         }
         names
       }
@@ -153,7 +165,15 @@ pub async fn cmd_secrets(args : Args) -> Unit {
       let buf = StringBuilder()
       for name in config.secrets {
         match secrets.get(name) {
-          Some(value) => buf.write_string("\{name}=\{value}\n")
+          Some(value) =>
+            if secret_value_has_newline(value) {
+              raise CliError::Failed(
+                1,
+                "secret '\{name}' contains a newline and cannot be written to secrets.env; store it again without one",
+              )
+            } else {
+              buf.write_string("\{name}=\{value}\n")
+            }
           None => ()
         }
       }
@@ -213,6 +233,19 @@ pub fn valid_secret_name(name : String) -> Bool {
     }
   }
   true
+}
+
+///|
+/// `secrets.env` is one KEY=value per line, so a value containing a line break
+/// would silently become a different secret when read back.
+pub fn secret_value_has_newline(value : String) -> Bool {
+  for i in 0..<value.length() {
+    let c = value.get_char(i).unwrap_or(' ')
+    if c == '\n' || c == '\r' {
+      return true
+    }
+  }
+  false
 }
 
 ///|
