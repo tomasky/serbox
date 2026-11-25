@@ -1,0 +1,492 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "kupas/serbox"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub async fn all_boxes() -> Array[BoxConfig]
+
+pub async fn all_jobs(String) -> Array[Job]
+
+pub async fn all_port_forwards() -> Array[PortForward]
+
+pub async fn all_snapshots() -> Array[Snapshot]
+
+pub async fn allocate_host_port(Int32) -> Int32
+
+pub fn ascii_lowercase(String) -> String
+
+pub fn bold(String) -> String
+
+pub async fn box_blocked_reason(BoxConfig, Bool) -> String?
+
+pub fn box_config_path(String) -> String
+
+pub let box_data_root : String
+
+pub let box_home : String
+
+pub async fn box_mkdir_p(String, String) -> Unit
+
+pub async fn box_path_exists(String, String) -> Bool
+
+pub async fn box_path_is_dir(String, String) -> Bool
+
+pub let box_shell : String
+
+pub fn boxes_dir() -> String
+
+pub async fn cmd_auto_suspend(Args) -> Unit
+
+pub async fn cmd_completion(Args) -> Unit
+
+pub async fn cmd_cp(Args) -> Unit
+
+pub async fn cmd_create(Args) -> Unit
+
+pub async fn cmd_disk(Args) -> Unit
+
+pub async fn cmd_doctor(Args) -> Unit
+
+pub async fn cmd_exec(Args) -> Unit
+
+pub async fn cmd_files(Args) -> Unit
+
+pub async fn cmd_fork(Args) -> Unit
+
+pub async fn cmd_gc(Args) -> Unit
+
+pub async fn cmd_get(Args) -> Unit
+
+pub async fn cmd_history(Args) -> Unit
+
+pub async fn cmd_jobs(Args) -> Unit
+
+pub async fn cmd_lifecycle(String, Args) -> Unit
+
+pub async fn cmd_logs(Args) -> Unit
+
+pub async fn cmd_ls(Args) -> Unit
+
+pub async fn cmd_max_run(Args) -> Unit
+
+pub async fn cmd_metrics(Args) -> Unit
+
+pub async fn cmd_output(Args) -> Unit
+
+pub async fn cmd_port(Args) -> Unit
+
+pub async fn cmd_ps(Args) -> Unit
+
+pub async fn cmd_pull(Args) -> Unit
+
+pub async fn cmd_push(Args) -> Unit
+
+pub async fn cmd_rename(Args) -> Unit
+
+pub async fn cmd_resize(Args) -> Unit
+
+pub async fn cmd_rm(Args) -> Unit
+
+pub async fn cmd_run(Args) -> Unit
+
+pub async fn cmd_secrets(Args) -> Unit
+
+pub async fn cmd_skills(Args) -> Unit
+
+pub async fn cmd_snapshot(Args) -> Unit
+
+pub async fn cmd_ssh(Args) -> Unit
+
+pub async fn cmd_templates() -> Unit
+
+pub async fn cmd_update(Args) -> Unit
+
+pub async fn cmd_usage() -> Unit
+
+pub async fn cmd_version() -> Unit
+
+pub fn colors_enabled() -> Bool
+
+pub fn command_argv(Args) -> Array[String]
+
+pub async fn commit_container(String, String) -> DockerResult
+
+pub fn compact_time(Int64) -> String
+
+pub async fn confirm(String) -> Bool
+
+pub async fn container_exists(String) -> Bool
+
+pub async fn container_ip(String) -> String?
+
+pub async fn container_logs(String, Int32, Bool) -> Int32
+
+pub fn container_name(String) -> String
+
+pub let container_prefix : String
+
+pub async fn container_state(String) -> String
+
+pub async fn container_stats(String) -> @json.Json?
+
+pub async fn container_top(String, Bool) -> DockerResult
+
+pub fn copies_contents(String) -> Bool
+
+pub async fn copy_in(String, String, String) -> DockerResult
+
+pub async fn copy_out(String, String, String) -> DockerResult
+
+pub async fn create_box(CreateOptions) -> BoxConfig
+
+pub let default_template : String
+
+pub async fn delete_box_config(String) -> Unit
+
+pub async fn delete_snapshot_config(String) -> Unit
+
+pub fn dim(String) -> String
+
+pub fn display_state(String, String) -> String
+
+pub async fn docker_available() -> Bool
+
+pub async fn docker_capture(Array[String]) -> DockerResult
+
+pub async fn docker_inherit(Array[String]) -> Int32
+
+pub async fn eline(String) -> Unit
+
+pub async fn ensure_dir(String) -> Unit
+
+pub async fn ensure_image(String) -> Bool
+
+pub fn error_code_name(Int32) -> String
+
+pub fn exec_argv(Array[String], Int64?, shell? : String) -> Array[String]
+
+pub async fn exec_box_batch(String, Array[String], String?, Map[String, String], Int64?, shell? : String) -> Int32
+
+pub fn exec_command_of(Args) -> Array[String]
+
+pub async fn exec_in_box(String, Array[String], String?, Map[String, String], Bool) -> Int32
+
+pub async fn exec_in_box_capture(String, Array[String]) -> DockerResult
+
+pub async fn exec_in_box_capture_argv(String, Array[String], String?, Map[String, String], Bool) -> DockerResult
+
+pub fn format_age(Int64) -> String
+
+pub fn format_duration(Int64) -> String
+
+pub fn format_size(Int64) -> String
+
+pub fn generate_box_name(String) -> String
+
+pub fn green(String) -> String
+
+pub fn history_dir() -> String
+
+pub fn host_name() -> String
+
+pub async fn host_path_is_dir(String) -> Bool
+
+pub async fn image_exists(String) -> Bool
+
+pub async fn job_exit_code(String, String) -> Int32?
+
+pub fn job_log_path(String) -> String
+
+pub async fn job_pid(String, String) -> Int32
+
+pub fn jobs_dir() -> String
+
+pub async fn json_only(@json.Json) -> Bool
+
+pub fn json_requested() -> Bool
+
+pub async fn line(String) -> Unit
+
+pub async fn list_dir(String) -> Array[String]
+
+pub async fn load_box(String) -> BoxConfig?
+
+pub async fn load_box_or_fail(String) -> BoxConfig
+
+pub async fn load_port_forward(String, Int32) -> PortForward?
+
+pub async fn load_secrets() -> Map[String, String]
+
+pub async fn load_snapshot(String) -> Snapshot?
+
+pub async fn main_cli() -> Unit
+
+pub fn new_box_config(String, String, String) -> BoxConfig
+
+pub fn now_secs() -> Int64
+
+pub async fn out(String) -> Unit
+
+pub fn pad_left(String, Int32) -> String
+
+pub fn pad_right(String, Int32) -> String
+
+pub fn parse_args(Array[String], Array[String], Array[String]) -> Args raise
+
+pub fn parse_assignment(String, String) -> (String, String) raise
+
+pub fn parse_duration(String, default_unit_secs? : Int64) -> Int64?
+
+pub fn parse_port(String) -> Int32 raise
+
+pub fn parse_publish(String) -> PortMap raise
+
+pub fn path_basename(String) -> String
+
+pub fn path_dirname(String) -> String
+
+pub fn path_join(String, String) -> String
+
+pub async fn pause_container(String) -> DockerResult
+
+pub async fn port_free(Int32) -> Bool
+
+pub fn port_record_path(String, Int32) -> String
+
+pub fn ports_dir() -> String
+
+pub async fn print_command_help(String) -> Unit
+
+pub async fn print_usage() -> Unit
+
+pub async fn publish_port(BoxConfig, Int32, Int32) -> PortForward
+
+pub async fn pull_image(String) -> Bool
+
+pub async fn pull_path(String, String, String?) -> Unit
+
+pub async fn push_path(String, String, String?, Bool) -> Unit
+
+pub async fn read_env_file(String) -> Map[String, String]
+
+pub async fn read_history(String, Int32) -> Array[HistoryEntry]
+
+pub async fn read_lines(String) -> Array[String]
+
+pub async fn read_text(String) -> String?
+
+pub async fn record_history(String, HistoryEntry) -> Unit
+
+pub fn red(String) -> String
+
+pub async fn remove_container(String) -> DockerResult
+
+pub async fn remove_image(String) -> DockerResult
+
+pub fn render_table(Array[String], Array[Array[String]]) -> String
+
+pub async fn require_box(String) -> BoxConfig?
+
+pub async fn require_usable(BoxConfig, Bool) -> Unit
+
+pub async fn restart_container(String) -> DockerResult
+
+pub async fn run_container(String, String, Array[String]) -> DockerResult
+
+pub async fn run_forwarder(String, Int32, Int32) -> Unit
+
+pub async fn run_setup_file(BoxConfig, String, Bool) -> Unit
+
+pub async fn save_box(BoxConfig) -> Unit
+
+pub async fn save_port_forward(PortForward) -> Unit
+
+pub async fn save_snapshot(Snapshot) -> Unit
+
+pub async fn secrets_names() -> Array[String]
+
+pub fn secrets_path() -> String
+
+pub async fn self_exe() -> String
+
+pub fn serbox_exit(Int32) -> Unit
+
+pub fn serbox_home() -> String
+
+pub let serbox_skill : String
+
+pub let serbox_version : String
+
+pub fn set_json_mode(Bool) -> Unit
+
+pub fn shell_join(Array[String]) -> String
+
+pub fn shell_quote(String) -> String
+
+pub fn skill_targets() -> Array[SkillTarget]
+
+pub fn snapshot_config_path(String) -> String
+
+pub fn snapshot_image(String) -> String
+
+pub let snapshot_image_prefix : String
+
+pub fn snapshots_dir() -> String
+
+pub fn split_assignment(String) -> (String, String)?
+
+pub async fn start_container(String) -> DockerResult
+
+pub async fn start_job(BoxConfig, Array[String], String?, Map[String, String]) -> Job
+
+pub fn stdout_is_tty() -> Bool
+
+pub async fn stop_container(String) -> DockerResult
+
+pub fn template_image(String) -> String?
+
+pub let template_names : Array[String]
+
+pub async fn touch_box(BoxConfig) -> Unit
+
+pub fn trim_trailing_slash(String) -> String
+
+pub async fn unpause_container(String) -> DockerResult
+
+pub async fn unpublish_port(String, Int32) -> Unit
+
+pub fn usage_error(String) -> CliError
+
+pub fn user_home() -> String
+
+pub fn valid_box_name(String) -> Bool
+
+pub fn valid_secret_name(String) -> Bool
+
+pub fn valid_snapshot_name(String) -> Bool
+
+pub fn with_box_defaults(@json.Json) -> @json.Json
+
+pub async fn write_text(String, String) -> Unit
+
+pub fn yellow(String) -> String
+
+// Errors
+pub suberror CliError {
+  Usage(String)
+  Failed(Int32, String)
+}
+
+// Types and methods
+pub struct Args {
+  positional : Array[String]
+  values : Map[String, Array[String]]
+  bools : Map[String, Bool]
+  rest : Array[String]
+}
+pub fn Args::all(Self, String) -> Array[String]
+pub fn Args::arg(Self, Int32, String) -> String raise
+pub fn Args::arg_opt(Self, Int32) -> String?
+pub fn Args::flag(Self, String) -> Bool
+pub fn Args::need(Self, String) -> String raise
+pub fn Args::value(Self, String) -> String?
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct BoxConfig {
+  mut name : String
+  mut template : String
+  mut image : String
+  mut shell : String
+  mut created_at : Int64
+  mut env : Map[String, String]
+  mut meta : Map[String, String]
+  mut ports : Array[PortMap]
+  mut secrets : Array[String]
+  mut auto_suspend_secs : Int64
+  mut max_run_secs : Int64
+  mut paused_by : String
+  mut last_used_at : Int64
+  mut delete_at : Int64
+  mut setup_exit : Int32
+}
+
+pub struct Check {
+  name : String
+  ok : Bool
+  detail : String
+}
+
+pub struct CreateOptions {
+  name : String
+  template : String
+  image : String
+  env : Map[String, String]
+  meta : Map[String, String]
+  ports : Array[PortMap]
+  secrets : Array[String]
+  auto_suspend_secs : Int64
+  delete_at : Int64
+}
+
+pub struct DockerResult {
+  code : Int32
+  out : String
+  err : String
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct HistoryEntry {
+  mut id : String
+  mut command : String
+  mut exit_code : Int32
+  mut started_at : Int64
+  mut duration_ms : Int64
+  mut stdout_text : String
+  mut stderr_text : String
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct Job {
+  mut id : String
+  mut box : String
+  mut command : String
+  mut started_at : Int64
+  mut pid : Int32
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct PortForward {
+  mut box : String
+  mut container : Int32
+  mut host : Int32
+  mut pid : Int32
+  mut created_at : Int64
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct PortMap {
+  mut container : Int32
+  mut host : Int32
+}
+
+pub struct SkillTarget {
+  name : String
+  dirs : Array[String]
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct Snapshot {
+  mut name : String
+  mut image : String
+  mut source : String
+  mut created_at : Int64
+  mut description : String
+}
+
+// Type aliases
+
+// Traits

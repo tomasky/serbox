@@ -1,0 +1,8 @@
+import {
+  "kupas/serbox",
+  "moonbitlang/async/stdio",
+}
+
+supported_targets = "+native"
+
+pkgtype(kind: "executable")

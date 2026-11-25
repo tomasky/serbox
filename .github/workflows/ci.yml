@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  moon:
+    name: MoonBit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Update registry index
+        run: moon update
+
+      - name: Check formatting
+        run: moon fmt --check
+
+      - name: Check warnings
+        run: moon check --target native --deny-warn
+
+      - name: Test
+        run: moon test --target native
+
+      - name: Build
+        run: moon build --target native --release
+
+      - name: Exercise the CLI without docker
+        run: |
+          set -eu
+          bin=_build/native/release/build/cmd/main/main.exe
+          "$bin" version
+          "$bin" help >/dev/null
+          "$bin" ls --json | grep -q '^\[\]'
+          "$bin" exec nope --json -- true || test "$?" = 4
+
+  static:
+    name: static Linux binary
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools qemu-user
+
+      - name: Update registry index
+        run: moon update
+
+      - name: Build static
+        run: ./scripts/build-linux-static.sh dist/serbox-linux-x86_64
+
+      - name: Runs on the oldest x86-64 CPU model
+        run: qemu-x86_64 -cpu qemu64 dist/serbox-linux-x86_64 version
+
+  npm:
+    name: npm launcher
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test
+        working-directory: npmjs
+        run: node --test
+
+      - name: Pack
+        working-directory: npmjs
+        run: npm pack --dry-run
