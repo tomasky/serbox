@@ -4,7 +4,7 @@
 set -euo pipefail
 box="${1:?usage: deps.sh BOX DIR}"
 dir="${2:?usage: deps.sh BOX DIR}"
-run() { serbox exec "$box" --workdir "$dir" -- "$@"; }
+run() { serbox exec "$box" --cwd "$dir" -- "$@"; }
 have() { serbox exec "$box" -- "command -v '$1' >/dev/null 2>&1"; }
 
 if serbox exec "$box" -- "test -f '$dir/package.json'"; then

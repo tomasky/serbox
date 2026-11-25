@@ -29,7 +29,7 @@ fi
 serbox push "$box" "$work/repo.tar" /tmp/serbox-move.tar >/dev/null
 serbox exec "$box" -- sh -c "mkdir -p '$dest' && tar -xf /tmp/serbox-move.tar -C '$dest' && rm /tmp/serbox-move.tar"
 if [ "$git" = 1 ]; then
-  serbox exec "$box" --workdir "$dest" -- 'git status --short'
+  serbox exec "$box" --cwd "$dest" -- 'git status --short'
 fi
 bash "$S/deps.sh" "$box" "$dest"
 echo "moved $root to $box:$dest"

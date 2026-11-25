@@ -76,7 +76,7 @@ history in the box, omit that line and add `--no-git` when running
 ## 4. Verify and install dependencies
 
 ```sh
-serbox exec "$BOX" --workdir "$DEST" -- 'git status --short; git log -1 --oneline'
+serbox exec "$BOX" --cwd "$DEST" -- 'git status --short; git log -1 --oneline'
 bash "$S/deps.sh" "$BOX" "$DEST"
 ```
 

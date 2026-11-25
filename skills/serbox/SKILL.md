@@ -40,10 +40,10 @@ serbox templates                                  # known image aliases
 serbox doctor                                     # runtime and state checks
 ```
 
-`create` waits until the box accepts commands unless `--no-wait` is given.
+`create` returns once the box accepts commands.
 `--setup-file PATH` runs a script after creation; `--env K=V`, `--secrets NAME`,
 `--publish PORT` and `--auto-suspend 30m` are also accepted. Names are
-lowercase letters, digits and `-`, at most 63 characters.
+lowercase letters, digits, `_` and `-`, 1 to 40 characters.
 
 ## Run commands
 
@@ -58,7 +58,7 @@ serbox ssh work                                    # same, for muscle memory
 ```
 
 Exit codes are the command's own; 124 means `--timeout` expired, 130 means
-interrupted. Use `--workdir DIR` and `--env K=V` for one command.
+interrupted. Use `--cwd DIR` and `--env K=V` for one command.
 
 ## Files and secrets
 
@@ -79,8 +79,12 @@ serbox create --name work2 --secrets GITHUB_TOKEN
 ```
 
 Never echo a secret value into logs or commit it. To use a secret in a later
-`exec`, pass `--env NAME` (it reads the stored value) or source
-`/data/.serbox/secrets.env` inside the box.
+`exec`, source `/data/.serbox/secrets.env` inside the box, or pass an explicit
+`--env NAME=value` (the CLI does not read secret values from the store):
+
+```sh
+serbox exec work -- 'set -a; . /data/.serbox/secrets.env; set +a; ./deploy'
+```
 
 ## Background jobs
 
@@ -155,12 +159,15 @@ your local disk. Run interactive shells with `serbox shell`; it uses `ssh -t`.
 
 ```sh
 serbox usage
-serbox gc --max-age 7d --max-run 8h --dry-run
+serbox auto-suspend work 30m
+serbox max-run work 8h              # bare numbers mean minutes
+serbox gc --dry-run
 serbox logs work --tail 100
 serbox metrics work
 serbox history
 serbox completion bash
 ```
 
-`gc` reaps boxes with `--delete-after`, runs due setup files and auto-suspends
-idle boxes. `--max-run 0` disables the limit.
+`gc` deletes boxes whose `--delete-after` has passed and pauses boxes that hit
+their auto-suspend or max-run limit. Limits are per box, so set them with
+`auto-suspend` and `max-run`; `max-run 0` disables that limit.
