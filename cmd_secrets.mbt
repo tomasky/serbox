@@ -172,12 +172,22 @@ pub async fn cmd_secrets(args : Args) -> Unit {
                 "secret '\{name}' contains a newline and cannot be written to secrets.env; store it again without one",
               )
             } else {
-              buf.write_string("\{name}=\{value}\n")
+              // Single-quote the value so `set -a; . secrets.env` assigns it
+              // literally instead of expanding `$VAR`, backticks or `$(...)`.
+              buf.write_string("\{name}=")
+              buf.write_string(shell_single_quote(value))
+              buf.write_char('\n')
             }
           None => ()
         }
       }
-      let host_path = path_join(serbox_home(), "secrets.env.tmp")
+      // A fixed temp name would let two concurrent `secrets push` runs
+      // deliver each other's values. The random suffix keeps them separate.
+      let nonce = match @env.rand(8) {
+        Some(bytes) => hex_encode(bytes)
+        None => raise CliError::Failed(1, "cannot read random bytes")
+      }
+      let host_path = path_join(serbox_home(), "secrets-\{nonce}.env")
       ensure_dir(serbox_home()) catch {
         _ => ()
       }

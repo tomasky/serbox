@@ -23,6 +23,14 @@ async fn write_secret_env_file(entries : Array[(String, String)]) -> String? {
   let buf = StringBuilder()
   for entry in entries {
     let (key, value) = entry
+    // A newline would end the KEY=value line early and inject another
+    // variable into `docker run --env-file`.
+    if secret_value_has_newline(value) {
+      raise CliError::Failed(
+        1,
+        "secret '\{key}' contains a newline and cannot be used as an environment variable",
+      )
+    }
     buf.write_string("\{key}=\{value}\n")
   }
   write_secret(path, buf.to_string()) catch {
@@ -432,7 +440,11 @@ pub async fn run_setup_file(
   if prepared.code != 0 {
     raise CliError::Failed(1, "could not prepare the setup directory")
   }
-  let local_copy = path_join(serbox_home(), "setup.tmp.sh")
+  let nonce = match @env.rand(8) {
+    Some(bytes) => hex_encode(bytes)
+    None => raise CliError::Failed(1, "cannot read random bytes")
+  }
+  let local_copy = path_join(serbox_home(), "setup-\{nonce}.sh")
   ensure_dir(serbox_home()) catch {
     _ => ()
   }
@@ -831,27 +843,29 @@ pub async fn cmd_auto_suspend(args : Args) -> Unit {
 }
 
 ///|
-/// `serbox max-run BOX MINUTES`
+/// `serbox max-run BOX DURATION` — bare numbers mean minutes, so `90`, `2h`
+/// and `45m` all work.
 pub async fn cmd_max_run(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
-  let text = args.arg(1, "minutes")
-  let minutes = @string.parse_int(text) catch {
-    _ => raise usage_error("bad minutes '\{text}'")
+  let text = args.arg(1, "duration")
+  let secs = match parse_duration(text) {
+    Some(secs) => secs
+    None => raise usage_error("bad duration '\{text}' (e.g. 2h, 45m or 0)")
   }
-  // `0` (or a negative value) turns the limit off. Pausing immediately was a
-  // surprise: this command configures the limit, it does not pause the box.
-  if minutes <= 0 {
-    config.max_run_secs = 0L
-  } else {
-    config.max_run_secs = minutes.to_int64() * 60L
-  }
+  // `0` turns the limit off. Pausing immediately was a surprise: this command
+  // configures the limit, it does not pause the box.
+  config.max_run_secs = secs
   save_box(config) catch {
     _ => ()
   }
   if json_only(@json.to_json(config)) {
     return
   }
-  line("max run set to \{minutes} minute(s)")
+  if secs == 0L {
+    line("max run off for \{config.name}")
+  } else {
+    line("max run set to \{format_duration(secs)}")
+  }
 }
 
 ///|

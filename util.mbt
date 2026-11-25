@@ -87,21 +87,69 @@ pub async fn read_text(path : String) -> String? {
 }
 
 ///|
-/// Replace a file's contents.
-pub async fn write_text(path : String, text : String) -> Unit {
-  @fs.write_file(path, text, create_mode=@fs.CreateOrTruncate)
+/// Replace a file's contents atomically, so a crash never leaves a truncated
+/// JSON record that `load_box` would silently skip.
+async fn write_text_mode(
+  path : String,
+  text : String,
+  permission : Int32,
+) -> Unit {
+  let stamp = match @env.rand(8) {
+    Some(bytes) => hex_encode(bytes)
+    None => @env.now().to_string()
+  }
+  let tmp = path_join(
+    path_dirname(path),
+    ".serbox-tmp-\{serbox_getpid()}-\{stamp}",
+  )
+  @fs.write_file(tmp, text, create_mode=@fs.CreateOrTruncate, permission~)
+  @fs.rename(tmp, path, replace=true)
 }
 
 ///|
-/// Write a file only the owner can read, for hosts and secrets.
+/// Replace a file's contents.
+pub async fn write_text(path : String, text : String) -> Unit {
+  write_text_mode(path, text, 0o644)
+}
+
+///|
+/// Replace a file only the owner can read, for secrets and history.
 pub async fn write_secret(path : String, text : String) -> Unit {
-  @fs.write_file(path, text, create_mode=@fs.CreateOrTruncate, permission=0o600)
-  // `permission=` only applies when the file is created. An existing file
-  // written by an older build (or restored from a backup) may still be 0644,
-  // and these files hold tokens and secrets, so enforce the mode every time.
+  // `secrets set` (or the first `host add`) may be the first command on a
+  // host, before anything else created the state directory.
+  ensure_dir(path_dirname(path)) catch {
+    _ => ()
+  }
+  write_text_mode(path, text, 0o600)
+  // Replacing via rename gives the temp file's mode, but an existing file may
+  // have been replaced by something else; enforce the mode every time.
   @fs.chmod(path, 0o600) catch {
     _ => ()
   }
+}
+
+///|
+/// Replace a file with private contents. Used for command history, which can
+/// contain output the user did not expect to be world-readable.
+pub async fn write_private_text(path : String, text : String) -> Unit {
+  write_text_mode(path, text, 0o600)
+}
+
+///|
+/// Quote a value so a POSIX shell reads it back literally.
+pub fn shell_single_quote(text : String) -> String {
+  let buf = StringBuilder()
+  buf.write_char('\'')
+  for i in 0..<text.length() {
+    let c = text.get_char(i).unwrap_or(' ')
+    if c == '\'' {
+      buf.write_string("'\\''")
+    } else {
+      buf.write_char(c)
+    }
+  }
+  buf.write_char('\'')
+  buf.to_string()
 }
 
 ///|

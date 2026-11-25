@@ -94,7 +94,7 @@ pub async fn record_history(box : String, entry : HistoryEntry) -> Unit {
     buf.write_string(lines[i])
     buf.write_char('\n')
   }
-  write_text(path, buf.to_string()) catch {
+  write_private_text(path, buf.to_string()) catch {
     _ => ()
   }
 }
@@ -143,6 +143,7 @@ pub async fn cmd_exec(args : Args) -> Unit {
     }
     env.set(key, value)
   }
+  let background = args.flag("background")
   let timeout_secs = match args.value("timeout") {
     Some(text) =>
       match parse_duration(text, default_unit_secs=1L) {
@@ -151,9 +152,10 @@ pub async fn cmd_exec(args : Args) -> Unit {
           raise usage_error("--timeout is at most 600 seconds")
         _ => raise usage_error("bad --timeout '\{text}'")
       }
-    None => Some(60L)
+    // A background job is the way to run something long; the foreground
+    // 60-second default would silently kill it.
+    None => if background { None } else { Some(60L) }
   }
-  let background = args.flag("background")
   require_usable(config, true)
   touch_box(config) catch {
     _ => ()
@@ -396,9 +398,9 @@ pub async fn cmd_jobs(args : Args) -> Unit {
       }
       let timeout = match args.value("timeout") {
         Some(text) =>
-          match parse_duration(text) {
-            Some(secs) => secs
-            None => raise usage_error("bad --timeout '\{text}'")
+          match parse_duration(text, default_unit_secs=1L) {
+            Some(secs) if secs >= 0L => secs
+            _ => raise usage_error("bad --timeout '\{text}' (e.g. 30s or 10m)")
           }
         None => 0L
       }
@@ -811,10 +813,15 @@ pub async fn cmd_metrics(args : Args) -> Unit {
 pub async fn cmd_logs(args : Args) -> Unit {
   let config = load_box_or_fail(args.arg(0, "box name"))
   let tail = match args.value("tail") {
-    Some(text) =>
-      @string.parse_int(text) catch {
+    Some(text) => {
+      let parsed = @string.parse_int(text) catch {
         _ => raise usage_error("bad --tail '\{text}'")
       }
+      if parsed < 0 || parsed > 100000 {
+        raise usage_error("--tail is 0 to 100000")
+      }
+      parsed
+    }
     None => 100
   }
   let code = container_logs(config.name, tail, args.flag("follow"))

@@ -93,6 +93,7 @@ fn canonical_flag(name : String) -> String {
     "f" => "follow"
     "e" => "env"
     "p" => "parents"
+    "workdir" => "cwd"
     "r" => "recursive"
     "q" => "quiet"
     "h" => "help"
@@ -323,14 +324,24 @@ pub async fn main_cli() -> Unit {
         report_usage("--remote needs a host name")
         return
       }
-      remote.val = argv[i]
+      let host = argv[i].trim().to_owned()
+      if host.length() == 0 {
+        report_usage("--remote needs a non-empty host name")
+        return
+      }
+      remote.val = host
       i = i + 1
     } else if arg.clamped_view().has_prefix("-H=") ||
       arg.clamped_view().has_prefix("--remote=") {
-      remote.val = match split_assignment(arg) {
-        Some((_, value)) => value
+      let host = match split_assignment(arg) {
+        Some((_, value)) => value.trim().to_owned()
         None => ""
       }
+      if host.length() == 0 {
+        report_usage("--remote needs a non-empty host name")
+        return
+      }
+      remote.val = host
     } else if arg == "--no-color" {
       @env.set_env_var("NO_COLOR", "1")
     } else if arg == "--json" {
@@ -393,7 +404,10 @@ pub async fn main_cli() -> Unit {
   if target_host.length() > 0 &&
     command != "serve" &&
     command != "host" &&
-    command != "version" {
+    command != "version" &&
+    command != "skills" &&
+    command != "completion" &&
+    command != "update" {
     // `--json` is a client-side global, so it was stripped above; the remote
     // command has to be told too or it prints a table into our JSON pipe.
     let forwarded : Array[String] = []

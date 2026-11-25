@@ -86,3 +86,22 @@ test "short image names are distinguished from registry references" {
   assert_true(image_has_registry("ghcr.io/owner/image:tag"))
   assert_true(image_has_registry("localhost:5000/image"))
 }
+
+///|
+test "ssh targets cannot be mistaken for ssh options" {
+  assert_true(valid_ssh_target("me@server.example.com"))
+  assert_true(valid_ssh_target("root@10.0.0.2"))
+  assert_false(valid_ssh_target(""))
+  assert_false(valid_ssh_target("-"))
+  assert_false(valid_ssh_target("-oProxyCommand=sh"))
+  assert_false(valid_ssh_target("me@host with space"))
+  assert_false(valid_ssh_target("me@host\n-oProxyCommand=sh"))
+}
+
+///|
+test "shell single quoting keeps values literal" {
+  assert_eq(shell_single_quote("plain"), "'plain'")
+  assert_eq(shell_single_quote("a b"), "'a b'")
+  assert_eq(shell_single_quote("it's"), "'it'\\''s'")
+  assert_eq(shell_single_quote("$HOME `id`"), "'$HOME `id`'")
+}

@@ -682,7 +682,8 @@ async fn start_tunnel(host : HostRecord) -> Unit {
       "host '\{host.name}' has no ssh target; add it again with `serbox host add`",
     )
   }
-  if pid_alive(host.tunnel_pid) {
+  if pid_alive(host.tunnel_pid) &&
+    (is_tunnel_pid(host.tunnel_pid, host) catch { _ => false }) {
     let _ = @process.run("kill", ["-TERM", "\{host.tunnel_pid}"]) catch {
       _ => 0
     }
@@ -724,6 +725,9 @@ async fn start_tunnel(host : HostRecord) -> Unit {
     _ => raise CliError::Failed(1, "could not start ssh to \{host.target}")
   }
   if !wait_for_port(host.local_port, 100) || !pid_alive(pid) {
+    // A failed ssh that is still running would hold the local port and block
+    // the next attempt.
+    let _ = @process.run("kill", ["-TERM", "\{pid}"]) catch { _ => 0 }
     raise CliError::Failed(
       1,
       "ssh tunnel to \{host.target} did not come up; see \{log_path}",
@@ -1229,6 +1233,51 @@ async fn ssh_interactive(host : HostRecord, argv : Array[String]) -> Int32 {
 }
 
 ///|
+/// Reject a target that ssh would read as an option, and characters that
+/// cannot belong in USER@HOST.
+fn valid_ssh_target(target : String) -> Bool {
+  if target.length() == 0 || target.length() > 255 || target.has_prefix("-") {
+    return false
+  }
+  for i in 0..<target.length() {
+    let c = target.get_char(i).unwrap_or(' ')
+    if c <= ' ' || c == '\u{7f}' {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Whether `pid` is the ssh tunnel recorded for `host`, so a recycled pid
+/// never gets killed by a stale host record.
+async fn is_tunnel_pid(pid : Int32, host : HostRecord) -> Bool {
+  if !pid_alive(pid) {
+    return false
+  }
+  let cmdline = match read_text("/proc/\{pid}/cmdline") {
+    Some(text) => text
+    None => return false
+  }
+  let args : Array[String] = []
+  for part in cmdline.split("\u{0}") {
+    args.push(part.to_owned())
+  }
+  let want = "127.0.0.1:\{host.local_port}:127.0.0.1:\{host.remote_port}"
+  let mut forward = false
+  let mut target = false
+  for i in 0..<args.length() {
+    if args[i] == "-L" && i + 1 < args.length() && args[i + 1] == want {
+      forward = true
+    }
+    if args[i] == host.target {
+      target = true
+    }
+  }
+  forward && target
+}
+
+///|
 /// `serbox host add NAME USER@HOST [--port N] [--install]`
 pub async fn cmd_host_add(args : Args) -> Unit {
   let name = args.arg(0, "host name")
@@ -1242,6 +1291,20 @@ pub async fn cmd_host_add(args : Args) -> Unit {
       "bad host name '\{name}' (lowercase letters, digits, _ and -)",
     )
   }
+  if args.value("address") is Some(_) {
+    if args.value("token") is None {
+      raise usage_error("--address needs --token")
+    }
+    if args.value("port") is Some(_) ||
+      args.flag("install") ||
+      args.arg_opt(1) is Some(_) {
+      raise usage_error(
+        "--address takes no USER@HOST, --port or --install; give only --address and --token",
+      )
+    }
+  } else if args.value("token") is Some(_) {
+    raise usage_error("--token is only used with --address")
+  }
   match load_host(name) {
     Some(existing) =>
       if !args.flag("force") {
@@ -1249,7 +1312,8 @@ pub async fn cmd_host_add(args : Args) -> Unit {
           1,
           "host '\{name}' already exists; pass --force to replace it",
         )
-      } else if pid_alive(existing.tunnel_pid) {
+      } else if pid_alive(existing.tunnel_pid) &&
+        (is_tunnel_pid(existing.tunnel_pid, existing) catch { _ => false }) {
         let _ = @process.run("kill", ["-TERM", "\{existing.tunnel_pid}"]) catch {
           _ => 0
         }
@@ -1265,8 +1329,8 @@ pub async fn cmd_host_add(args : Args) -> Unit {
         raise usage_error("--address must be 127.0.0.1:PORT")
       }
       let token = match args.value("token") {
-        Some(token) => token
-        None => raise usage_error("--address needs --token")
+        Some(token) if token.trim().length() > 0 => token
+        _ => raise usage_error("--address needs a non-empty --token")
       }
       let host : HostRecord = {
         name,
@@ -1282,6 +1346,11 @@ pub async fn cmd_host_add(args : Args) -> Unit {
     }
     None => {
       let target = args.arg(1, "user@host")
+      if !valid_ssh_target(target) {
+        raise usage_error(
+          "bad ssh target '\{target}' (expected USER@HOST, not starting with '-')",
+        )
+      }
       let remote_port = match args.value("port") {
         Some(text) => {
           let port = @string.parse_int(text) catch {
@@ -1448,12 +1517,24 @@ pub async fn cmd_host_ls(_args : Args) -> Unit {
   let rows : Array[Array[String]] = []
   let items : Array[@json.Json] = []
   for host in hosts {
-    let state = if local_port_open(host.local_port) {
-      "connected"
-    } else if host.target.trim().length() > 0 {
-      "down"
+    let open = local_port_open(host.local_port)
+    let tunnel_ours = if host.tunnel_pid > 0 && open {
+      is_tunnel_pid(host.tunnel_pid, host) catch {
+        _ => false
+      }
     } else {
-      "external"
+      false
+    }
+    let state = if host.target.trim().length() == 0 {
+      if open {
+        "external"
+      } else {
+        "down"
+      }
+    } else if open && tunnel_ours {
+      "connected"
+    } else {
+      "down"
     }
     let current = current_host()
     let marker = if current.length() > 0 && current == host.name {
@@ -1504,7 +1585,8 @@ pub async fn cmd_host_rm(args : Args) -> Unit {
     Some(host) => host
     None => raise CliError::Failed(4, "no such host '\{name}'")
   }
-  if pid_alive(host.tunnel_pid) {
+  if pid_alive(host.tunnel_pid) &&
+    (is_tunnel_pid(host.tunnel_pid, host) catch { _ => false }) {
     let _ = @process.run("kill", ["-TERM", "\{host.tunnel_pid}"]) catch {
       _ => 0
     }

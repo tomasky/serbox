@@ -389,6 +389,8 @@ pub fn shell_join(Array[String]) -> String
 
 pub fn shell_quote(String) -> String
 
+pub fn shell_single_quote(String) -> String
+
 pub fn skill_description(String) -> String
 
 pub fn skill_targets() -> Array[SkillTarget]
@@ -442,6 +444,8 @@ pub fn valid_secret_name(String) -> Bool
 pub fn valid_snapshot_name(String) -> Bool
 
 pub fn with_box_defaults(@json.Json) -> @json.Json
+
+pub async fn write_private_text(String, String) -> Unit
 
 pub async fn write_secret(String, String) -> Unit
 
